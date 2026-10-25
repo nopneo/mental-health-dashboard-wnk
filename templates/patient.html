@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block body %}
+<p><a href="{{ request.referrer if request.referrer and '/patients' in request.referrer else url_for('patients') }}" class="back">‹ กลับไปรายชื่อ</a></p>
+<div class="pagehead">
+  <div>
+    <h1>{{ p.name }}
+      {% if p.color %}<span class="badge lg {{ p.color }}"><span class="dot {{ p.color }}"></span>สี{{ COLORS[p.color] }}</span>{% endif %}
+    </h1>
+    <p class="muted">HN {{ p.hn }} · {{ 'ชาย' if p.sex == 'ช' else 'หญิง' if p.sex == 'ญ' else '-' }} {{ p.age if p.age is not none else '-' }} ปี ·
+      {{ p.addr }}{% if p.moo %} ม.{{ p.moo|int }}{% endif %} · {{ PCU_NAME[p.pcu] }}</p>
+    <p class="muted">โทร {{ p.phone or '-' }}{% if p.inform %} · ผู้ติดต่อ {{ p.inform }} {{ p.inform_tel }}{% endif %}</p>
+  </div>
+</div>
+
+<div class="grid3">
+  {% for key, name in CRITERIA %}{% set ok, src = p.crit[key] %}
+  <div class="card critcard {{ 'ok' if ok else ('bad' if ok is not none else 'na') }}">
+    <span class="lbl">{{ name }}</span>
+    <span class="val">{{ 'ดี' if ok else ('ไม่ดี' if ok is not none else 'ยังไม่ประเมิน') }}</span>
+    <span class="sub">
+      {% if src == 'assess' %}จากการประเมิน {{ thai_date(p.assess.assess_date) }}
+      {% elif src == 'hosxp' %}
+        {% if key == 'med' %}{% if ok %}ไม่พบขาดนัด/ยาฉีดเลยกำหนด (HOSxP){% else %}
+          {% if p.missed %}ขาดนัด {{ thai_date(p.missed.date) }}{% endif %}
+          {% if p.lai and p.lai.status == 'overdue' %} · ยาฉีดเลยกำหนด {{ p.lai.late_days }} วัน{% endif %} (HOSxP){% endif %}
+        {% else %}{% if ok %}ไม่มีรหัสสารเสพติดใน 6 เดือน (HOSxP){% else %}มีรหัส F10–F19 ล่าสุด {{ thai_date(p.sub_last) }} (HOSxP){% endif %}{% endif %}
+      {% else %}ต้องประเมินในแอป{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="grid2">
+  <section class="card">
+    <h2>การรักษา</h2>
+    <dl class="facts">
+      <dt>กลุ่มโรค</dt><dd>{% for g in p.groups %}{{ GROUP_NAME[g] }}{{ ', ' if not loop.last }}{% endfor %}</dd>
+      <dt>รหัสโรค 12 เดือน</dt><dd>{% for c, d in p.codes|dictsort %}<span class="chip">{{ c }}</span>{% endfor %}</dd>
+      <dt>วินิจฉัยครั้งแรก</dt><dd>{{ thai_date(p.first_dx) }}</dd>
+      <dt>มาโรงพยาบาลล่าสุด</dt><dd>{{ thai_date(p.last_visit) }}</dd>
+      <dt>นัดคลินิกจิตเวช</dt><dd>ครั้งก่อน {{ thai_date(p.last_app) }} · ครั้งถัดไป <b>{{ thai_date(p.next_app) }}</b>
+        {% if p.missed %}<span class="chip {{ 'crit' if p.missed.days > 30 else 'warn' }}">ขาดนัด {{ p.missed.days }} วัน</span>{% endif %}</dd>
+      {% if p.lai %}
+      <dt>ยาฉีด LAI</dt><dd>ฉีดล่าสุด {{ thai_date(p.lai.last) }} · รอบละ {{ p.lai.interval }} วัน · ครบกำหนด <b>{{ thai_date(p.lai.due) }}</b>
+        {% if p.lai.status == 'overdue' %}<span class="chip crit">เลย {{ p.lai.late_days }} วัน</span>
+        {% elif p.lai.status in ('due', 'late') %}<span class="chip warn">ใกล้/ถึงกำหนด</span>{% endif %}</dd>
+      {% endif %}
+    </dl>
+  </section>
+  <section class="card">
+    <h2>เหตุการณ์สำคัญ 12 เดือน</h2>
+    <dl class="facts">
+      <dt>นอน รพ. ตอนนี้</dt><dd>{% if p.admit %}<span class="chip crit">AN {{ p.admit.an }} · {{ p.admit.ward }} · ตั้งแต่ {{ thai_date(p.admit.regdate) }}</span>{% else %}ไม่ได้นอน รพ.{% endif %}</dd>
+      <dt>Admit ด้วยโรคจิตเวช</dt><dd>{{ p.ipd12 }} ครั้ง{% if p.last_dc %} · D/C ล่าสุด {{ thai_date(p.last_dc.date) }} ({{ p.last_dc.dx }}){% endif %}
+        {% if p.dc_pending %}<span class="chip crit">ยังไม่ได้ติดตามหลัง D/C</span>{% endif %}</dd>
+      <dt>Refer ล่าสุด</dt><dd>{% if p.refer %}{{ thai_date(p.refer.date) }} → {{ p.refer.dest }}{% else %}–{% endif %}</dd>
+      <dt>คัดกรองล่าสุด</dt><dd>{% if p.screen %}{{ thai_date(p.screen.date) }} · 9Q = {{ p.screen.q9 if p.screen.q9 is not none else '-' }} · 8Q = {{ p.screen.q8 if p.screen.q8 is not none else '-' }}
+        {% if p.q8_high %}<span class="chip crit">8Q เสี่ยงสูง</span>{% endif %}{% else %}–{% endif %}</dd>
+      <dt>ทำร้ายตนเอง</dt><dd>{{ thai_date(p.selfharm) if p.selfharm else '–' }}</dd>
+    </dl>
+  </section>
+</div>
+
+<div class="grid2">
+  <section class="card">
+    <h2>บันทึกผลประเมิน</h2>
+    <form method="post" class="assess">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      {% for key, name in CRITERIA %}{% set ok = p.crit[key][0] %}
+      <fieldset>
+        <legend>{{ name }}</legend>
+        <label class="opt ok"><input type="radio" name="{{ key }}" value="1" {{ 'checked' if ok == true }}> ดี</label>
+        <label class="opt bad"><input type="radio" name="{{ key }}" value="0" {{ 'checked' if ok == false }}> ไม่ดี</label>
+        <label class="opt na"><input type="radio" name="{{ key }}" value="" {{ 'checked' if ok is none }}> ไม่ได้ประเมิน</label>
+      </fieldset>
+      {% endfor %}
+      <label>วันที่ประเมิน<input type="date" name="assess_date" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}"></label>
+      <label>หมายเหตุ<textarea name="note" rows="2" maxlength="500" placeholder="เช่น เยี่ยมบ้านพร้อม อสม. ญาติดูแลกินยาทุกวัน"></textarea></label>
+      <button class="btn">บันทึก</button>
+      <p class="note">ค่าที่เลือกไว้คือสถานะปัจจุบัน (รวมค่าจาก HOSxP) · ถ้าภายหลัง HOSxP พบขาดนัดหรือรหัสสารเสพติดใหม่ ระบบจะใช้ข้อมูลที่ใหม่กว่า</p>
+    </form>
+  </section>
+  <section class="card">
+    <h2>ประวัติการประเมิน</h2>
+    {% if history %}
+    <table class="tbl">
+      <thead><tr><th>วันที่</th><th>ยา</th><th>ญาติ</th><th>สาร</th><th>ผู้ประเมิน / หมายเหตุ</th></tr></thead>
+      <tbody>
+      {% for h in history %}
+        <tr>
+          <td class="nowrap">{{ thai_date(h.assess_date, True) }}</td>
+          {% for key in ['med', 'care', 'sub'] %}
+          <td>{% if h[key] == 1 %}<span class="crit ok">ดี</span>{% elif h[key] == 0 %}<span class="crit bad">ไม่ดี</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+          {% endfor %}
+          <td class="small">{{ h.display or h.username }}{% if h.note %}<div class="muted">{{ h.note }}</div>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="muted">ยังไม่เคยประเมิน</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

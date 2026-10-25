@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{% block title %}งานสุขภาพจิต{% endblock %} · {{ hospital }}</title>
+<link rel="icon" href="{{ logo_url }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ version }}">
+</head>
+<body>
+{% if user %}
+<header class="topbar">
+  <a class="brand" href="{{ url_for('dashboard') }}">
+    <img src="{{ logo_url }}" alt="">
+    <span><b>งานสุขภาพจิต</b><small>{{ hospital }}</small></span>
+  </a>
+  <nav>
+    {% set ep = request.endpoint %}
+    <a href="{{ url_for('dashboard') }}" class="{{ 'on' if ep == 'dashboard' }}">ภาพรวม</a>
+    <a href="{{ url_for('patients') }}" class="{{ 'on' if ep in ('patients', 'patient') }}">รายชื่อผู้ป่วย</a>
+    <a href="{{ url_for('yearly') }}" class="{{ 'on' if ep == 'yearly' }}">ย้อนหลังรายปี</a>
+  </nav>
+  <div class="who">
+    <span>{{ user.display }}<small>{{ 'ทุก รพ.สต.' if user.hospcode == 'all' else 'รพ.สต.' ~ PCU_NAME.get(user.hospcode, user.hospcode) }}</small></span>
+    <form method="post" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="btn ghost sm">ออกจากระบบ</button>
+    </form>
+  </div>
+</header>
+{% else %}
+<header class="topbar">
+  <a class="brand" href="{{ url_for('dashboard') }}">
+    <img src="{{ logo_url }}" alt="">
+    <span><b>งานสุขภาพจิต</b><small>{{ hospital }}</small></span>
+  </a>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">ภาพรวม</a>
+    <a href="{{ url_for('yearly') }}" class="{{ 'on' if request.endpoint == 'yearly' }}">ย้อนหลังรายปี</a>
+  </nav>
+  {% if request.endpoint != 'login' %}<a class="btn sm" href="{{ url_for('login') }}">เข้าสู่ระบบ</a>{% endif %}
+</header>
+{% endif %}
+<main class="sheet">
+  {% with msgs = get_flashed_messages() %}
+    {% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</main>
+<footer class="foot">ข้อมูลจาก HOSxP (ฐานสำรอง อ่านอย่างเดียว){% if user %} · มีชื่อผู้ป่วย ห้ามถ่ายภาพหน้าจอส่งออกนอกระบบ{% endif %} · v{{ version }}</footer>
+</body>
+</html>

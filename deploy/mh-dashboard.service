@@ -1,0 +1,27 @@
+# วางที่ /etc/systemd/system/mh-dashboard.service แล้ว: systemctl daemon-reload && systemctl enable --now mh-dashboard
+[Unit]
+Description=Mental Health Dashboard (Flask/Gunicorn)
+After=network.target
+
+[Service]
+User=mh
+Group=mh
+WorkingDirectory=/opt/mental_health
+ExecStart=/opt/mental_health/.venv/bin/gunicorn -w 3 -t 120 -b 127.0.0.1:6300 app:app
+Restart=always
+Environment=PYTHONUNBUFFERED=1
+StateDirectory=mh
+# ไม่ใช้ root: โค้ดเป็นของ root อ่าน .env ได้ผ่านกลุ่ม mh · เขียนได้เฉพาะ data/
+ReadWritePaths=/opt/mental_health/data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

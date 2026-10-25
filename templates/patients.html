@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}รายชื่อผู้ป่วย{% endblock %}
+{% macro flags(p) -%}
+  {% if p.admit %}<span class="chip crit">นอน รพ. {{ p.admit.ward }}</span>{% endif %}
+  {% if p.q8_high %}<span class="chip crit">8Q {{ p.screen.q8 }}</span>{% endif %}
+  {% if p.dc_pending %}<span class="chip crit">D/C {{ thai_date(p.last_dc.date, True) }} ยังไม่ติดตาม</span>{% endif %}
+  {% if p.lai %}
+    {% if p.lai.status == 'overdue' %}<span class="chip crit">ยาฉีดเลย {{ p.lai.late_days }} วัน</span>
+    {% elif p.lai.status == 'late' %}<span class="chip warn">ยาฉีดเลย {{ p.lai.late_days }} วัน</span>
+    {% elif p.lai.status == 'due' %}<span class="chip warn">ยาฉีดครบ {{ thai_date(p.lai.due, True) }}</span>
+    {% else %}<span class="chip">ยาฉีดทุก {{ p.lai.interval }} วัน</span>{% endif %}
+  {% endif %}
+  {% if p.missed %}<span class="chip {{ 'crit' if p.missed.days > 30 else 'warn' }}">ขาดนัด {{ p.missed.days }} วัน</span>{% endif %}
+  {% if p.selfharm %}<span class="chip warn">ทำร้ายตนเอง {{ thai_date(p.selfharm, True) }}</span>{% endif %}
+  {% if p.refer %}<span class="chip">Refer {{ thai_date(p.refer.date, True) }}</span>{% endif %}
+{%- endmacro %}
+{% block body %}
+<div class="pagehead">
+  <div>
+    <h1>รายชื่อผู้ป่วย</h1>
+    <p class="muted">เรียงตามความเร่งด่วน: ข้อไม่ดี › 8Q สูง › D/C ยังไม่ติดตาม › ยาฉีดเลยกำหนด › ขาดนัด
+      · ข้อมูล ณ {{ reg.at.strftime('%H:%M') }} น.</p>
+  </div>
+  <form method="post" action="{{ url_for('refresh') }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <button class="btn ghost">ดึงข้อมูลใหม่</button>
+  </form>
+</div>
+
+<form class="filters card" method="get">
+  {% if scope == 'all' %}
+  <label>หน่วยบริการ
+    <select name="pcu">
+      <option value="">ทั้งหมด</option>
+      {% for code, name in PCU_NAME.items() %}<option value="{{ code }}" {{ 'selected' if f.pcu == code }}>{{ name }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  <label>สี
+    <select name="color">
+      <option value="">ทุกสี</option>
+      {% for c in ['red', 'yellow', 'green'] %}<option value="{{ c }}" {{ 'selected' if f.color == c }}>{{ COLORS[c] }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>ต้องติดตาม
+    <select name="flag">
+      <option value="">ทั้งหมด</option>
+      {% for key, (name, _) in FLAGS.items() %}<option value="{{ key }}" {{ 'selected' if f.flag == key }}>{{ name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>กลุ่มโรค
+    <select name="group">
+      <option value="">ทุกกลุ่ม</option>
+      {% for key, name in GROUP_NAME.items() %}<option value="{{ key }}" {{ 'selected' if f.group == key }}>{{ name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="grow">ค้นหา HN / ชื่อ<input name="q" value="{{ f.q or '' }}" placeholder="เช่น 0012345 หรือ สมชาย"></label>
+  <button class="btn">กรอง</button>
+  <a class="btn ghost" href="{{ url_for('patients') }}">ล้าง</a>
+</form>
+
+<p class="count"><b>{{ '{:,}'.format(rows|length) }}</b> ราย{% if scope != 'all' %} · เฉพาะเขต รพ.สต.{{ PCU_NAME.get(scope, scope) }}{% endif %}</p>
+
+<div class="card flush">
+<div class="tablewrap">
+<table class="tbl pts">
+  <thead>
+    <tr><th>สี</th><th>ผู้ป่วย</th><th>ที่อยู่ / หน่วยบริการ</th><th>กลุ่มโรค</th><th>3 ข้อ</th><th>ต้องติดตาม</th><th>นัดถัดไป</th></tr>
+  </thead>
+  <tbody>
+  {% for p in rows[:500] %}
+    <tr>
+      <td>{% if p.color %}<span class="badge {{ p.color }}"><span class="dot {{ p.color }}"></span>{{ COLORS[p.color] }}</span>{% else %}<span class="muted">–</span>{% endif %}
+        {% if p.incomplete and p.main %}<div class="tiny muted">ประเมินไม่ครบ</div>{% endif %}</td>
+      <td><a class="pname" href="{{ url_for('patient', hn=p.hn) }}">{{ p.name }}</a>
+        <div class="tiny muted">HN {{ p.hn }} · {{ p.sex }} {{ p.age if p.age is not none else '-' }} ปี</div></td>
+      <td>{{ p.addr }}{% if p.moo %} ม.{{ p.moo|int }}{% endif %}<div class="tiny muted">{{ PCU_NAME[p.pcu] }}</div></td>
+      <td class="small">{{ GROUP_NAME[p.group] }}{% if p.groups|length > 1 %}<div class="tiny muted">+{{ p.groups|length - 1 }} กลุ่ม</div>{% endif %}</td>
+      <td class="crits">
+        {% for key, name in CRITERIA %}{% set ok, src = p.crit[key] %}
+          <span class="crit {{ 'ok' if ok else ('bad' if ok is not none else 'na') }}" title="{{ name }}: {{ 'ดี' if ok else ('ไม่ดี' if ok is not none else 'ยังไม่ประเมิน') }}{{ ' (จาก HOSxP)' if src == 'hosxp' }}">{{ {'med': 'ยา', 'care': 'ญาติ', 'sub': 'สาร'}[key] }}</span>
+        {% endfor %}
+      </td>
+      <td class="flags">{{ flags(p) }}</td>
+      <td class="small nowrap">{{ thai_date(p.next_app, True) if p.next_app else '–' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="empty">ไม่พบผู้ป่วยตามเงื่อนไข</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if rows|length > 500 %}<p class="note pad">แสดง 500 รายแรก — กรองให้แคบลงเพื่อดูส่วนที่เหลือ</p>{% endif %}
+</div>
+{% endblock %}

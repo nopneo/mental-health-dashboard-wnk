@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}ย้อนหลังรายปี{% endblock %}
+{% macro chart(key, title, note='', pct=False) %}
+{% set vals = rows|map(attribute=key)|map('default', 0)|list %}
+{% set vmax = (vals|max) or 1 %}
+{% set n = rows|length %}
+{% set bw = 340 / n %}
+<figure class="card mini">
+  <figcaption><b>{{ title }}</b>{% if note %}<small>{{ note }}</small>{% endif %}</figcaption>
+  <svg viewBox="0 0 360 150" role="img" aria-label="{{ title }} รายปีงบประมาณ">
+    <line x1="10" y1="120" x2="350" y2="120" class="axis"/>
+    {% for r in rows %}
+      {% set v = r[key] or 0 %}
+      {% set h = (v / vmax * 96) if v else 0 %}
+      {% set x = 10 + loop.index0 * bw + bw * 0.18 %}
+      <g class="b{{ ' partial' if r.partial }}">
+        <rect class="hit" x="{{ 10 + loop.index0 * bw }}" y="10" width="{{ bw }}" height="125"/>
+        {% if h %}<path d="M{{ x }},120 V{{ 120 - h + 3 }} q0,-3 3,-3 h{{ bw * 0.64 - 6 }} q3,0 3,3 V120 Z"/>{% endif %}
+        <title>ปีงบ {{ r.fy }}{{ ' (ถึงปัจจุบัน)' if r.partial }}: {{ v }}{{ '%' if pct }}</title>
+        {% if loop.revindex <= 2 or v == vmax %}
+          <text x="{{ x + bw * 0.32 }}" y="{{ 120 - h - 6 }}" class="val">{{ v }}{{ '%' if pct }}</text>
+        {% endif %}
+        <text x="{{ x + bw * 0.32 }}" y="136" class="tick">{{ r.fy % 100 }}</text>
+      </g>
+    {% endfor %}
+  </svg>
+</figure>
+{% endmacro %}
+{% block body %}
+<div class="pagehead">
+  <div>
+    <h1>ข้อมูลย้อนหลังรายปีงบประมาณ</h1>
+    <p class="muted">ปีงบ = ต.ค.–ก.ย. · แท่งโปร่งคือปีงบปัจจุบัน (ยังไม่ครบปี) · ชี้ที่แท่งเพื่อดูตัวเลข · ไม่นับ F51 นอนไม่หลับ</p>
+  </div>
+</div>
+
+<div class="minis">
+  {{ chart('total', 'ผู้ป่วยจิตเวชทั้งหมด', 'ราย (มีรหัส F)') }}
+  {{ chart('new_pts', 'ผู้ป่วยรายใหม่', 'วินิจฉัย F ครั้งแรก') }}
+  {{ chart('psy', 'โรคจิต F20–F29', 'ราย') }}
+  {{ chart('dep', 'ซึมเศร้า F32–F39', 'ราย') }}
+  {{ chart('sub', 'สุรา / สารเสพติด F10–F19', 'ราย') }}
+  {{ chart('lai_pts', 'ผู้ป่วยยาฉีด LAI', 'ราย') }}
+  {{ chart('admits', 'Admit ด้วยโรคจิตเวช', 'ครั้ง (dx หลัก F)') }}
+  {{ chart('refer_psy', 'ส่งต่อ รพ.จิตเวช', 'ครั้ง') }}
+  {{ chart('selfharm', 'ทำร้ายตนเอง X60–X84', 'ราย') }}
+  {{ chart('missed_pct', 'อัตราขาดนัดคลินิกจิตเวช', 'ร้อยละของนัด', True) }}
+  {{ chart('q8_high', '8Q เสี่ยงสูง', 'ครั้ง') }}
+  {{ chart('screens', 'คัดกรอง 2Q/9Q ใน HOSxP', 'ครั้ง · ลดลงมากตั้งแต่ปีงบ 67') }}
+</div>
+
+<section class="card">
+  <h2>ตาราง</h2>
+  <div class="tablewrap">
+  <table class="tbl num">
+    <thead>
+      <tr><th>ปีงบ</th><th>ผู้ป่วยทั้งหมด</th><th>รายใหม่</th><th>โรคจิต</th><th>Bipolar</th><th>ซึมเศร้า</th><th>สุรา/สาร</th><th>วิตกกังวล</th>
+        <th>ยาฉีด (ราย)</th><th>ฉีด (ครั้ง)</th><th>Admit</th><th>ส่ง รพ.จิตเวช</th><th>ทำร้ายตนเอง</th><th>นัด</th><th>ขาดนัด %</th><th>คัดกรอง</th><th>9Q ≥ 7</th><th>8Q สูง</th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows|reverse %}
+      <tr class="{{ 'partial' if r.partial }}">
+        <td class="b">{{ r.fy }}{{ '*' if r.partial }}</td>
+        {% for k in ['total', 'new_pts', 'psy', 'bip', 'dep', 'sub', 'anx', 'lai_pts', 'lai_inj', 'admits', 'refer_psy', 'selfharm', 'apps'] %}
+        <td>{{ '{:,}'.format(r[k] or 0) }}</td>
+        {% endfor %}
+        <td>{{ r.missed_pct if r.missed_pct is not none else '–' }}</td>
+        <td>{{ '{:,}'.format(r.screens or 0) }}</td><td>{{ r.q9_pos or 0 }}</td><td>{{ r.q8_high or 0 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="note">* ปีงบปัจจุบัน ถึงวันนี้ · ขาดนัด = นัดคลินิก 025 ที่ไม่มี visit ตั้งแต่ 3 วันก่อนถึง 7 วันหลังนัด</p>
+</section>
+{% endblock %}

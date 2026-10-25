@@ -1,0 +1,18 @@
+.env
+data/
+dist/
+out/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# เฉพาะโรงพยาบาลผู้พัฒนา (รพ.วังน้ำเขียว) — ไม่ขึ้น GitHub
+.claude/
+village_pcu.csv
+DATA_MAP.md
+static/img/hospital_logo.png
+static/img/hero.jpg
+# คลิปแนะนำ + ภาพหน้าจอจริงที่ถ่ายมาทำคลิป
+video/
+/*.jpg

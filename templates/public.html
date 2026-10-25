@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mental Health Dashboard — {{ hospital }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='public.css') }}?v={{ version }}">
+<link rel="icon" href="{{ logo_url }}">
+<meta name="theme-color" content="#6d28d9">
+</head>
+
+{#- โดนัท SVG: items = [{label,value,pct,color}] -#}
+{% macro donut(items, total, unit='ราย', size=104, vsize=9) %}
+{% set r = 15.915 %}
+<svg viewBox="0 0 42 42" width="{{ size }}" height="{{ size }}" style="flex:none" role="img">
+  <circle cx="21" cy="21" r="{{ r }}" fill="none" stroke="#f1ebff" stroke-width="7.4"></circle>
+  {% set ns = namespace(off=25) %}
+  {% for it in items %}{% if it.pct > 0 %}
+  <circle cx="21" cy="21" r="{{ r }}" fill="none" stroke="{{ it.color }}" stroke-width="7.4"
+          stroke-dasharray="{{ it.pct }} {{ 100 - it.pct }}" stroke-dashoffset="{{ ns.off }}">
+    <title>{{ it.label }} {{ it.value }} {{ unit }} ({{ it.pct }}%)</title></circle>
+  {% set ns.off = ns.off - it.pct %}
+  {% endif %}{% endfor %}
+  <text x="21" y="21.4" text-anchor="middle" font-size="{{ vsize }}" font-family="Kanit" font-weight="700" fill="#3b1d6e">{{ total }}</text>
+  <text x="21" y="26.6" text-anchor="middle" font-size="4" font-family="Sarabun" fill="#8b7fa8">{{ unit }}</text>
+</svg>
+{% endmacro %}
+
+{% macro legend(items) %}
+<div class="legend">
+  {% for it in items %}
+  <div class="li"><span class="dot" style="background:{{ it.color }}"></span>
+    <span class="nm" title="{{ it.label }}">{{ it.label }}</span>
+    <span class="vl">{{ it.value }}</span><span class="pc">({{ it.pct }}%)</span></div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+<body>
+{% set k = s.kpi %}
+<div class="toolbar">
+  <span class="asof">ข้อมูล ณ {{ thai_date(reg.at) }} เวลา {{ reg.at.strftime('%H:%M') }} น. · ผู้ป่วยที่มารับบริการด้านจิตเวชใน 12 เดือนล่าสุด</span>
+  {% if user %}
+    <a class="login" href="{{ url_for('patients') }}">📋 รายชื่อผู้ป่วย</a>
+    <a class="login ghost" href="{{ url_for('yearly') }}">📈 ย้อนหลังรายปี</a>
+  {% else %}
+    <a class="login" href="{{ url_for('login') }}">🔒 เข้าสู่ระบบเพื่อดูรายชื่อผู้ป่วย</a>
+    <a class="login ghost" href="{{ url_for('yearly') }}">📈 ย้อนหลังรายปี</a>
+  {% endif %}
+</div>
+
+<div class="sheet">
+
+  <!-- ============================================================ hero -->
+  <div class="hero">
+    {% if hero_url %}<div class="bg"><img src="{{ hero_url }}" alt=""></div>{% endif %}
+    <div class="logo"><img src="{{ logo_url }}" alt="ตรา{{ hospital }}"></div>
+    <div>
+      <div class="name">{{ hospital }}</div>
+      {% if hospital_en %}<div class="name-en">{{ hospital_en }}</div>{% endif %}
+      <div class="ttl">Mental Health Dashboard <span>· แดชบอร์ดงานสุขภาพจิตและจิตเวช</span></div>
+      <div class="quote">“ใจที่ได้รับการดูแล — กินยาต่อเนื่อง ครอบครัวเคียงข้าง ชุมชนไม่ทิ้งกัน”</div>
+    </div>
+    <div class="meta">
+      <span class="a">ปีงบประมาณ {{ k.fy }}</span>
+      <div class="b">ข้อมูล 12 เดือนล่าสุด · จาก HOSxP<br>ณ {{ thai_date(reg.at) }} เวลา {{ reg.at.strftime('%H:%M') }} น.</div>
+    </div>
+  </div>
+
+  <!-- ====================================================== 1. KPI -->
+  <section class="block">
+    <header><span class="no">1</span>
+      <span><span class="t">Mental Health KPI</span> <span class="st">ภาพรวมงานสุขภาพจิต</span></span>
+      <span class="filters"><span class="chip">📅 12 เดือนล่าสุด</span><span class="chip">🏥 รพ. + {{ pcu_count }} รพ.สต.</span></span>
+    </header>
+    <div class="body">
+      <div class="kpis">
+        <div class="kpi g-purple"><span class="e">🧠</span>
+          <div class="l">ผู้ป่วยในความดูแล<small>Active Patients</small></div>
+          <div class="v">{{ '{:,}'.format(k.total) }}</div><div class="u">ราย · ไม่รวมนอนไม่หลับ {{ k.slp_only }} ราย</div>
+        </div>
+        <div class="kpi g-pink-d"><span class="e">🌱</span>
+          <div class="l">รายใหม่<small>New Cases ปีงบ {{ k.fy }}</small></div>
+          <div class="v">{{ k.new_fy }}</div><div class="u">ราย · วินิจฉัยครั้งแรก</div>
+        </div>
+        <div class="kpi g-teal"><span class="e">💉</span>
+          <div class="l">ผู้ป่วยยาฉีด<small>Long-acting Injection</small></div>
+          <div class="v">{{ k.lai }}</div><div class="u">ราย · ฉีดตามรอบ {{ s.lai_ontime_pct }}%</div>
+        </div>
+        <div class="kpi g-orange"><span class="e">📅</span>
+          <div class="l">ขาดนัด<small>Missed Appointment</small></div>
+          <div class="v">{{ k.missed }}</div><div class="u">ราย · เกิน 30 วัน {{ k.missed_30 }} ราย</div>
+        </div>
+        <div class="kpi g-blue"><span class="e">🛏</span>
+          <div class="l">นอน รพ. ตอนนี้<small>Admitted</small></div>
+          <div class="v">{{ k.admit }}</div><div class="u">ราย · Admit 12 เดือน {{ s.ipd.episodes }} ครั้ง</div>
+        </div>
+        <div class="kpi g-amber"><span class="e">🚐</span>
+          <div class="l">ส่งต่อ<small>Refer Out 12 เดือน</small></div>
+          <div class="v">{{ k.refer_12m }}</div><div class="u">ราย · เดือนนี้ {{ k.refer_month }} ราย</div>
+        </div>
+        <div class="kpi g-rose"><span class="e">🆘</span>
+          <div class="l">เสี่ยงฆ่าตัวตายสูง<small>8Q ≥ 17</small></div>
+          <div class="v">{{ k.q8 }}</div><div class="u">ราย · ทำร้ายตนเอง {{ k.selfharm }} ราย</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== 2. สี | 3. กลุ่มโรค | 4. ยาฉีด -->
+  <div class="row c3">
+    <section class="block">
+      <header><span class="no">2</span>
+        <span><span class="t">Risk Level</span> <span class="st">กลุ่มเฝ้าระวัง 3 สี</span></span></header>
+      <div class="body">
+        <div class="lights">
+          {% for it in s.colors_items %}
+          <a class="lt {{ it.key }}" href="{{ url_for('patients', color=it.key) }}">
+            <span class="h"><i></i>{{ it.label }}</span>
+            <span class="v">{{ '{:,}'.format(it.value) }}</span>
+            <span class="p">{{ it.pct }}%</span>
+          </a>
+          {% endfor %}
+        </div>
+        <div class="stackbar" style="margin-top:12px">
+          {% for it in s.colors_items if it.value %}<span style="flex:{{ it.value }};background:{{ it.color }}" title="{{ it.label }} {{ it.value }} ราย"></span>{% endfor %}
+        </div>
+        <div class="mini-h" style="margin-top:16px">📋 ผลแยกตามเกณฑ์ 3 ข้อ</div>
+        <table class="t">
+          <thead><tr><th>เกณฑ์</th><th>ดี</th><th>ไม่ดี</th><th>ยังไม่ประเมิน</th></tr></thead>
+          <tbody>
+            {% for c in s.crit_counts %}
+            <tr><td class="l">{{ {'med': '💊', 'care': '👨‍👩‍👧', 'sub': '🚭'}[c.key] }} {{ c.label }}</td>
+              <td><span class="pp good">{{ '{:,}'.format(c.good) }}</span></td>
+              <td>{% if c.bad %}<span class="pp bad">{{ '{:,}'.format(c.bad) }}</span>{% else %}–{% endif %}</td>
+              <td>{% if c.na %}<span class="pp flat">{{ '{:,}'.format(c.na) }}</span>{% else %}–{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="note">ดีครบ 3 ข้อ = <b style="color:#157a35">เขียว</b> · ไม่ดี 1–2 ข้อ = <b style="color:#92600a">เหลือง</b> · ไม่ดีครบ 3 ข้อ = <b style="color:#b91c1c">แดง</b><br>
+          <span class="nt">ค่าเริ่มต้นจาก HOSxP (ขาดนัด · ยาฉีดเลยกำหนด · รหัสสารเสพติด 6 เดือน) · ยังประเมิน "ญาติดูแล" ไม่ครบ {{ '{:,}'.format(s.incomplete) }} ราย</span></div>
+      </div>
+    </section>
+
+    <section class="block">
+      <header><span class="no">3</span>
+        <span><span class="t">Diagnosis Group</span> <span class="st">กลุ่มโรค (ราย)</span></span></header>
+      <div class="body">
+        {% set gmax = s.groups|map(attribute='n')|max %}
+        <div class="hbars">
+          {% for g in s.groups if g.n %}
+          <div class="hb"><span class="nm">{{ g.name }}</span>
+            <span class="bar"><span class="track"><span class="fill" style="width:{{ (g.n * 100 / gmax)|round(1) }}%"></span></span>
+              <span class="vl">{{ g.n }}</span></span></div>
+          {% endfor %}
+        </div>
+        <div class="note"><span class="nt">หนึ่งคนอาจมีหลายกลุ่มโรค · ผู้ป่วยยาฉีดนับในกลุ่มโรคจิต · นอนไม่หลับ (F51) แยกไม่นับในยอดหลัก</span></div>
+      </div>
+    </section>
+
+    <section class="block">
+      <header><span class="no">4</span>
+        <span><span class="t">Long-acting Injection</span> <span class="st">ผู้ป่วยยาฉีด</span></span></header>
+      <div class="body">
+        <div class="donut-wrap">
+          {{ donut(s.lai_status, k.lai) }}
+          {{ legend(s.lai_status) }}
+        </div>
+        <div class="mini-h" style="margin-top:14px">💉 ยาที่ใช้ (ครั้งล่าสุด)</div>
+        {% set dmax = (s.lai_drugs|map(attribute='value')|max) if s.lai_drugs else 1 %}
+        <div class="hbars">
+          {% for d in s.lai_drugs %}
+          <div class="hb"><span class="nm">{{ d.name }}</span>
+            <span class="bar"><span class="track"><span class="fill" style="width:{{ (d.value * 100 / dmax)|round(1) }}%;background:linear-gradient(90deg,#0f9e93,#5eead4)"></span></span>
+              <span class="vl">{{ d.value }}</span></span></div>
+          {% endfor %}
+        </div>
+        <div class="note"><span class="nt">รอบฉีดคิดรายคนจากช่วงห่างการฉีดที่ผ่านมา · เลยกำหนดเกิน 7 วัน = ขาดยาฉีด</span></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============================== 5. IPD/Refer | 6. profile | 7. screening -->
+  <div class="row c3">
+    <section class="block">
+      <header><span class="no">5</span>
+        <span><span class="t">Admit · D/C · Refer</span> <span class="st">การรักษาต่อเนื่อง</span></span></header>
+      <div class="body">
+        <div class="ipdgrid">
+          <div class="qt"><div class="l">Admit 12 เดือน</div><div class="v">{{ s.ipd.episodes }}<span class="u">ครั้ง</span></div>
+            <div class="p">{{ s.ipd.pts }} ราย · dx หลักจิตเวช</div></div>
+          <div class="qt"><div class="l">นอน รพ. ตอนนี้</div><div class="v">{{ k.admit }}<span class="u">ราย</span></div>
+            <div class="p">ผู้ป่วยในทะเบียน</div></div>
+          <div class="qt ok"><div class="l">D/C 30 วัน · มา รพ. แล้ว</div><div class="v">{{ s.ipd.dc_done }}<span class="u">ราย</span></div>
+            <div class="p">จาก D/C {{ s.ipd.dc30 }} ราย</div></div>
+          <div class="qt {{ 'warn' if s.ipd.dc_pending }}"><div class="l">D/C 30 วัน · ยังไม่ติดตาม</div><div class="v">{{ s.ipd.dc_pending }}<span class="u">ราย</span></div>
+            <div class="p">ควรเยี่ยมบ้าน / โทรติดตาม</div></div>
+        </div>
+        <div class="mini-h" style="margin-top:14px">🚐 ส่งต่อไปที่ (12 เดือน)</div>
+        {% set rmax = (s.refer_dests|map(attribute='value')|max) if s.refer_dests else 1 %}
+        <div class="hbars">
+          {% for d in s.refer_dests %}
+          <div class="hb"><span class="nm">{{ d.name }}</span>
+            <span class="bar"><span class="track"><span class="fill" style="width:{{ (d.value * 100 / rmax)|round(1) }}%;background:linear-gradient(90deg,#2f6fe4,#93c5fd)"></span></span>
+              <span class="vl">{{ d.value }} ราย</span></span></div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <section class="block">
+      <header><span class="no">6</span>
+        <span><span class="t">Patient Profile</span> <span class="st">อายุ · เพศ</span></span></header>
+      <div class="body">
+        <div class="mini-h">👥 ช่วงอายุ</div>
+        {% set amax = (s.age|map(attribute='value')|max) or 1 %}
+        <div class="bars">
+          {% for a in s.age %}
+          <div class="b"><span class="n">{{ a.pct }}%</span><span class="p">{{ a.value }}</span>
+            <span class="fill" style="height:{{ (a.value * 100 / amax)|round(1) }}%;background:linear-gradient(180deg,#a78bfa,#7c3aed)"></span></div>
+          {% endfor %}
+        </div>
+        <div class="bars-x">{% for a in s.age %}<span>{{ a.label }} ปี</span>{% endfor %}</div>
+        <div class="mini-h" style="margin-top:18px">⚧ เพศ</div>
+        <div class="donut-wrap">
+          {{ donut(s.sex, '{:,}'.format(k.total), 'ราย', 92, 7) }}
+          {{ legend(s.sex) }}
+        </div>
+      </div>
+    </section>
+
+    <section class="block">
+      <header><span class="no">7</span>
+        <span><span class="t">Screening</span> <span class="st">คัดกรองซึมเศร้า/ฆ่าตัวตาย 12 เดือน</span></span></header>
+      <div class="body">
+        {% set sc = s.screen %}
+        <div class="qgrid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+          <div class="qt"><div class="l">คัดกรอง 2Q</div><div class="v">{{ '{:,}'.format(sc.pts or 0) }}<span class="u">ราย</span></div>
+            <div class="p">{{ '{:,}'.format(sc.screens or 0) }} ครั้ง</div></div>
+          <div class="qt"><div class="l">2Q ผลบวก</div><div class="v">{{ sc.q2_pos or 0 }}<span class="u">ครั้ง</span></div>
+            <div class="p">ต้องประเมิน 9Q ต่อ</div></div>
+        </div>
+        <div class="mini-h" style="margin-top:14px">😔 9Q ระดับซึมเศร้า</div>
+        {% set q9 = [{'label': 'น้อย (7–12)', 'value': sc.q9_mild or 0, 'color': '#fbbf24'},
+                     {'label': 'ปานกลาง (13–18)', 'value': sc.q9_mod or 0, 'color': '#fb923c'},
+                     {'label': 'รุนแรง (≥ 19)', 'value': sc.q9_sev or 0, 'color': '#dc2626'}] %}
+        {% set q9max = (q9|map(attribute='value')|max) or 1 %}
+        <div class="hbars">
+          {% for it in q9 %}<div class="hb"><span class="nm">{{ it.label }}</span><span class="bar"><span class="track"><span class="fill" style="width:{{ (it.value * 100 / q9max)|round(1) }}%;background:{{ it.color }}"></span></span><span class="vl">{{ it.value }}</span></span></div>{% endfor %}
+        </div>
+        <div class="mini-h" style="margin-top:6px">🆘 8Q เสี่ยงฆ่าตัวตาย</div>
+        {% set q8 = [{'label': 'น้อย (1–8)', 'value': sc.q8_low or 0, 'color': '#fbbf24'},
+                     {'label': 'ปานกลาง (9–16)', 'value': sc.q8_mid or 0, 'color': '#fb923c'},
+                     {'label': 'สูง (≥ 17)', 'value': sc.q8_high or 0, 'color': '#dc2626'}] %}
+        {% set q8max = (q8|map(attribute='value')|max) or 1 %}
+        <div class="hbars">
+          {% for it in q8 %}<div class="hb"><span class="nm">{{ it.label }}</span><span class="bar"><span class="track"><span class="fill" style="width:{{ (it.value * 100 / q8max)|round(1) }}%;background:{{ it.color }}"></span></span><span class="vl">{{ it.value }}</span></span></div>{% endfor %}
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ====================================================== 8. รพ.สต. -->
+  <section class="block">
+    <header><span class="no">8</span>
+      <span><span class="t">By Health Unit</span> <span class="st">แยกตาม รพ.สต. (จับคู่จากที่อยู่ ตำบล + หมู่)</span></span>
+      <span class="filters"><span class="chip">🔒 คลิกชื่อหน่วยเพื่อดูรายชื่อ (ต้องเข้าสู่ระบบ)</span></span></header>
+    <div class="body">
+      <table class="t">
+        <thead><tr><th>หน่วยบริการ</th><th>ผู้ป่วย</th><th>สัดส่วนสี</th>
+          <th><span class="dotk" style="background:#fca5a5"></span>แดง</th><th><span class="dotk" style="background:#fde68a"></span>เหลือง</th><th><span class="dotk" style="background:#86efac"></span>เขียว</th>
+          <th>โรคจิต</th><th>ขาดนัด</th><th>ยาฉีด</th><th>ยาฉีดเลยกำหนด</th></tr></thead>
+        <tbody>
+          {% for r in s.by_pcu if r.n %}
+          <tr>
+            <td class="l"><a href="{{ url_for('patients', pcu=r.code) }}">{{ ('รพ.สต.' if r.code not in (own_hospcode, 'unk', 'out') else '') ~ r.name }}</a></td>
+            <td><b>{{ r.n }}</b></td>
+            <td><div class="stackbar sm">{% for c, col in [('red', '#dc2626'), ('yellow', '#f5b014'), ('green', '#16a34a')] %}{% if r[c] %}<span style="flex:{{ r[c] }};background:{{ col }}"></span>{% endif %}{% endfor %}</div></td>
+            <td>{{ r.red or '–' }}</td><td>{{ r.yellow or '–' }}</td><td>{{ r.green or '–' }}</td>
+            <td>{{ r.psy or '–' }}</td><td>{{ r.missed or '–' }}</td><td>{{ r.lai or '–' }}</td>
+            <td>{% if r.lai_overdue %}<span class="pp bad">{{ r.lai_overdue }}</span>{% else %}–{% endif %}</td>
+          </tr>
+          {% endfor %}
+          {% set t = s.by_pcu %}
+          <tr class="tot"><td class="l" style="color:#fff">รวม</td><td>{{ t|sum(attribute='n') }}</td><td></td>
+            <td>{{ t|sum(attribute='red') }}</td><td>{{ t|sum(attribute='yellow') }}</td><td>{{ t|sum(attribute='green') }}</td>
+            <td>{{ t|sum(attribute='psy') }}</td><td>{{ t|sum(attribute='missed') }}</td><td>{{ t|sum(attribute='lai') }}</td><td>{{ t|sum(attribute='lai_overdue') }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============================== 9. trend | 10. alert -->
+  <div class="row c2">
+    <section class="block fy">
+      <header><span class="no">9</span>
+        <span><span class="t">Yearly Trend</span> <span class="st">ผู้ป่วยรายปีงบประมาณ</span></span>
+        <span class="filters"><a class="chip" style="text-decoration:none" href="{{ url_for('yearly') }}">📈 ดูทั้งหมด</a></span></header>
+      <div class="body">
+        <div class="sh-key">
+          <span><i style="background:#7c3aed"></i>ผู้ป่วยทั้งหมด</span>
+          <span><i style="background:#c4b5fd"></i>รายใหม่</span>
+          <span><i style="height:3px;background:#0f9e93"></i>ผู้ป่วยยาฉีด</span>
+        </div>
+        {% set top = ((years|map(attribute='total')|map('default', 0)|max) or 1) %}
+        {% set bw = 590 / (years|length) %}
+        <svg viewBox="0 0 640 250" width="100%" role="img" aria-label="ผู้ป่วยจิตเวชรายปีงบประมาณ">
+          {% for g in range(5) %}{% set y = 25 + g * 43.75 %}
+            <line x1="40" y1="{{ y }}" x2="630" y2="{{ y }}" stroke="#ece6f8"></line>
+            <text x="34" y="{{ y + 4 }}" font-size="11" fill="#a99cc6" text-anchor="end">{{ '{:,}'.format((top * (4 - g) / 4)|round|int) }}</text>
+          {% endfor %}
+          {% for t in years %}{% set cx = 40 + bw * loop.index0 %}
+            {% set h1 = 175 * (t.total or 0) / top %}{% set h2 = 175 * (t.new_pts or 0) / top %}
+            <g opacity="{{ '.45' if t.partial else '1' }}">
+              <rect x="{{ cx + bw*0.14 }}" y="{{ 200 - h1 }}" width="{{ bw*0.34 }}" height="{{ h1 }}" rx="4" fill="#7c3aed"><title>ปีงบ {{ t.fy }} ผู้ป่วย {{ t.total }} ราย</title></rect>
+              <rect x="{{ cx + bw*0.52 }}" y="{{ 200 - h2 }}" width="{{ bw*0.34 }}" height="{{ h2 }}" rx="4" fill="#c4b5fd"><title>ปีงบ {{ t.fy }} รายใหม่ {{ t.new_pts }} ราย</title></rect>
+            </g>
+            <text x="{{ cx + bw*0.5 }}" y="217" font-size="12" fill="#8b7fa8" text-anchor="middle">{{ t.fy }}{{ '*' if t.partial }}</text>
+            {% if loop.revindex == 2 %}
+              <text x="{{ cx + bw*0.31 }}" y="{{ 194 - h1 }}" font-size="12" font-weight="700" fill="#3b1d6e" text-anchor="middle">{{ '{:,}'.format(t.total) }}</text>
+              <text x="{{ cx + bw*0.69 }}" y="{{ 194 - h2 }}" font-size="11" font-weight="700" fill="#6d28d9" text-anchor="middle">{{ t.new_pts }}</text>
+            {% endif %}
+          {% endfor %}
+          {% set full = years|rejectattr('partial')|list %}
+          <polyline fill="none" stroke="#0f9e93" stroke-width="2.5" stroke-linejoin="round"
+            points="{% for t in full %}{{ 40 + bw*(loop.index0 + 0.5) }},{{ 200 - 175 * (t.lai_pts or 0) / top }} {% endfor %}"></polyline>
+          {% for t in full %}
+            <circle cx="{{ 40 + bw*(loop.index0 + 0.5) }}" cy="{{ 200 - 175 * (t.lai_pts or 0) / top }}" r="3.4" fill="#fff" stroke="#0f9e93" stroke-width="2"><title>ปีงบ {{ t.fy }} ผู้ป่วยยาฉีด {{ t.lai_pts }} ราย</title></circle>
+            {% if loop.last %}<text x="{{ 40 + bw*(loop.index0 + 0.5) }}" y="{{ 190 - 175 * (t.lai_pts or 0) / top }}" font-size="11" font-weight="700" fill="#0f766e" text-anchor="middle">{{ t.lai_pts }}</text>{% endif %}
+          {% endfor %}
+          <text x="335" y="242" font-size="11" fill="#a99cc6" text-anchor="middle">ปีงบประมาณ · * ปีงบปัจจุบัน ยังไม่ครบปี · ชี้ที่แท่งเพื่อดูตัวเลข</text>
+        </svg>
+      </div>
+    </section>
+
+    <section class="block alert-card">
+      <header><span class="no">10</span>
+        <span><span class="t">Alert & Action</span> <span class="st">เรื่องที่ต้องติดตาม</span></span></header>
+      <div class="body">
+        <table class="t alerts">
+          <thead><tr><th>ประเด็น</th><th>หน่วยงาน</th><th>สถานะ</th><th>Action</th></tr></thead>
+          <tbody>
+            {% for a in s.alerts %}
+            <tr>
+              <td class="l"><span class="lv">{{ '⚠️' if a.level == 'high' else ('🔶' if a.level == 'mid' else '📝') }}</span>
+                <a href="{{ url_for('patients', flag=a.flag) }}">{{ a.issue }}</a></td>
+              <td class="nw">{{ a.where }}</td>
+              <td><span class="pp {{ 'bad' if a.level == 'high' else ('watch' if a.level == 'mid' else 'flat') }}">{{ a.status }}</span></td>
+              <td>{{ a.action }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4">ไม่พบประเด็นเกินเกณฑ์เฝ้าระวัง</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="lock" style="margin-top:10px">🔒 คลิกประเด็นเพื่อดูรายชื่อผู้ป่วย — ต้อง<a href="{{ url_for('login') }}">เข้าสู่ระบบ</a>ด้วยบัญชีเจ้าหน้าที่</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot">
+    <div class="src"><b>แหล่งข้อมูล (Data Source)</b> — HOSxP: ovstdiag · opitemrece · oapp · ipt / iptdiag · referout · depression_screen · patient
+      (ฐานสำรอง อ่านอย่างเดียว) · หน้านี้แสดงเฉพาะยอดรวม ไม่มีชื่อหรือ HN ผู้ป่วย</div>
+    <div class="tag">“ดูแลใจอย่างต่อเนื่อง<br>ตั้งแต่โรงพยาบาลถึงบ้าน”</div>
+  </div>
+  <div class="appinfo"><span><b>Mental Health Dashboard</b> เวอร์ชัน {{ version }}</span><span>📞 ติดต่อ: {{ contact }}</span></div>
+</div>
+</body>
+</html>
