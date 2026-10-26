@@ -12,6 +12,7 @@ import os
 import secrets
 from datetime import date
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (Flask, abort, flash, g, redirect, render_template, request, session, url_for)
 
@@ -128,6 +129,17 @@ def _ctx():
             "today": date.today()}
 
 
+def _safe_next(nxt):
+    """next= หลัง login: รับเฉพาะ path ในแอป · เบราว์เซอร์ตัด tab/ขึ้นบรรทัด และอ่าน \\ เป็น /
+    ("/\\t/evil" → "//evil") จึงปฏิเสธอักขระควบคุมและ \\ ทั้งหมด"""
+    if "\\" in nxt or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in nxt):
+        return None
+    parts = urlsplit(nxt)
+    if parts.scheme or parts.netloc or nxt.startswith("//"):
+        return None
+    return nxt if nxt.startswith(request.script_root + "/") else None
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -137,9 +149,7 @@ def login():
             session.clear()
             session.permanent = True
             session["uid"] = u["id"]
-            nxt = request.args.get("next") or ""
-            ok = nxt.startswith(request.script_root + "/") and not nxt.startswith("//")
-            return redirect(nxt if ok else url_for("patients"))
+            return redirect(_safe_next(request.args.get("next") or "") or url_for("patients"))
         flash("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
     return render_template("login.html")
 
