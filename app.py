@@ -12,6 +12,7 @@ import os
 import secrets
 from datetime import date
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import (Flask, abort, flash, g, redirect, render_template, request, session, url_for)
 
@@ -49,12 +50,23 @@ class PrefixMiddleware:
 
 app = Flask(__name__)
 app.wsgi_app = PrefixMiddleware(app.wsgi_app)
-app.secret_key = os.getenv("MH_SECRET_KEY") or secrets.token_hex(32)
+_DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
+app.secret_key = os.getenv("MH_SECRET_KEY")
+if not app.secret_key:
+    # สุ่มเองไม่ได้: gunicorn หลาย worker จะได้กุญแจคนละตัว (login หลุดสุ่ม ๆ) และกุญแจเปลี่ยนทุกครั้งที่ restart
+    if not _DEBUG:
+        raise RuntimeError("ต้องตั้ง MH_SECRET_KEY ใน .env — สร้างด้วย: python3 -c \"import secrets; print(secrets.token_hex(32))\"")
+    app.secret_key = secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
 VERSION = "0.2.0"
+
+#: หน้าสาธารณะ: ยอดแยก รพ.สต. ที่น้อยกว่านี้แสดงเป็น "<N" (ตำบลเล็ก ยอด 1–2 รายอาจเดาตัวคนได้) · 0 = ปิด
+MIN_CELL = int(os.getenv("MH_PUBLIC_MIN_CELL", "5"))
+#: login ผิดเกินจำนวนนี้ใน LOGIN_WINDOW นาที → ปฏิเสธชั่วคราว (ตามชื่อผู้ใช้ / ตาม IP)
+LOGIN_MAX_USER, LOGIN_MAX_IP, LOGIN_WINDOW = 10, 30, 15
 
 
 @app.after_request
@@ -68,6 +80,20 @@ def _security_headers(resp):
 
 
 # ---------------------------------------------------------------- auth
+
+def client_ip():
+    """IP ผู้ใช้จริง: เชื่อ X-Forwarded-For เฉพาะเมื่อคำขอมาจาก proxy บนเครื่องเดียวกัน
+    และใช้ค่าตัวท้ายสุด (ที่ proxy ของเราเติม) — ตัวหน้า ๆ ผู้ใช้ปลอมเองได้"""
+    ip = request.remote_addr or ""
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff and ip in ("127.0.0.1", "::1"):
+        ip = xff.split(",")[-1].strip()
+    return ip[:45]
+
+
+def audit(action, hn=None, detail=None):
+    store.log(g.user["username"] if g.get("user") else None, action, hn, detail, client_ip())
+
 
 def login_required(f):
     @wraps(f)
@@ -114,10 +140,20 @@ def hospital_name():
     return name
 
 
+@app.template_filter("cell")
+def _cell(n):
+    """ยอดย่อยบนหน้าสาธารณะ: 1..MIN_CELL-1 → "<MIN_CELL" ถ้ายังไม่ login · 0 → "–" """
+    if not n:
+        return "–"
+    if MIN_CELL and n < MIN_CELL and not g.get("user"):
+        return f"<{MIN_CELL}"
+    return n
+
+
 @app.context_processor
 def _ctx():
     img = lambda n: os.path.exists(os.path.join(_HERE, "static", "img", n))
-    return {"version": VERSION, "csrf_token": _csrf_token, "user": g.get("user"),
+    return {"version": VERSION, "csrf_token": _csrf_token, "user": g.get("user"), "min_cell": MIN_CELL,
             "hospital": hospital_name(), "hospital_en": os.getenv("MH_HOSPITAL_NAME_EN", ""),
             "contact": os.getenv("MH_CONTACT", "งานสุขภาพจิต " + hospital_name()),
             "logo_url": url_for("static", filename="img/hospital_logo.png" if img("hospital_logo.png") else "img/logo.png"),
@@ -128,18 +164,35 @@ def _ctx():
             "today": date.today()}
 
 
+def _safe_next(nxt):
+    """next= หลัง login: รับเฉพาะ path ในแอป · เบราว์เซอร์ตัด tab/ขึ้นบรรทัด และอ่าน \\ เป็น /
+    ("/\\t/evil" → "//evil") จึงปฏิเสธอักขระควบคุมและ \\ ทั้งหมด"""
+    if "\\" in nxt or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in nxt):
+        return None
+    parts = urlsplit(nxt)
+    if parts.scheme or parts.netloc or nxt.startswith("//"):
+        return None
+    return nxt if nxt.startswith(request.script_root + "/") else None
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         _check_csrf()
-        u = store.check_login(request.form.get("username", "").strip(), request.form.get("password", ""))
+        username = request.form.get("username", "").strip()[:64]
+        by_user, by_ip = store.recent_failures(username, client_ip(), LOGIN_WINDOW)
+        if by_user >= LOGIN_MAX_USER or by_ip >= LOGIN_MAX_IP:
+            flash(f"ใส่รหัสผิดหลายครั้งเกินไป ลองใหม่อีก {LOGIN_WINDOW} นาที")
+            return render_template("login.html"), 429
+        u = store.check_login(username, request.form.get("password", ""))
         if u:
             session.clear()
             session.permanent = True
             session["uid"] = u["id"]
-            nxt = request.args.get("next") or ""
-            ok = nxt.startswith(request.script_root + "/") and not nxt.startswith("//")
-            return redirect(nxt if ok else url_for("patients"))
+            g.user = u
+            audit("login")
+            return redirect(_safe_next(request.args.get("next") or "") or url_for("patients"))
+        store.log(username, "login_fail", ip=client_ip())
         flash("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
     return render_template("login.html")
 
@@ -147,6 +200,10 @@ def login():
 @app.route("/logout", methods=["POST"])
 def logout():
     _check_csrf()
+    uid = session.get("uid")
+    g.user = store.get_user(uid) if uid else None
+    if g.user:
+        audit("logout")
     session.clear()
     return redirect(url_for("login"))
 
@@ -189,6 +246,8 @@ def patients():
         pcu = scope
     rows = queries.filter_patients(reg["pts"], pcu=pcu, color=color, flag=flag, group=group, q=q,
                                    allowed_pcu=scope)
+    audit("view_list", detail=" ".join(f"{k}={v}" for k, v in
+                                       (("pcu", pcu), ("color", color), ("flag", flag), ("group", group), ("q", q)) if v))
     return render_template("patients.html", rows=rows, reg=reg, scope=scope,
                            f={"pcu": pcu, "color": color, "flag": flag, "group": group, "q": q})
 
@@ -211,9 +270,11 @@ def patient(hn):
         ad = min(ad, date.today())
         store.add_assessment(hn, ad.isoformat(), val("med"), val("care"), val("sub"),
                              f.get("note"), g.user["username"])
+        audit("assess", hn)
         queries.invalidate()
         flash("บันทึกผลประเมินแล้ว")
         return redirect(url_for("patient", hn=hn))
+    audit("view_patient", hn)
     return render_template("patient.html", p=p, history=store.history(hn))
 
 
@@ -238,6 +299,5 @@ def healthz():
 
 
 if __name__ == "__main__":
-    debug = os.getenv("FLASK_DEBUG", "0") == "1"
-    app.run(host="127.0.0.1" if debug else os.getenv("MH_HOST", "0.0.0.0"),
-            port=int(os.getenv("PORT", "6300")), debug=debug)
+    app.run(host="127.0.0.1" if _DEBUG else os.getenv("MH_HOST", "127.0.0.1"),
+            port=int(os.getenv("PORT", "6300")), debug=_DEBUG)
