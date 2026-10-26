@@ -274,11 +274,12 @@
           {% for r in s.by_pcu if r.n %}
           <tr>
             <td class="l"><a href="{{ url_for('patients', pcu=r.code) }}">{{ ('รพ.สต.' if r.code not in (own_hospcode, 'unk', 'out') else '') ~ r.name }}</a></td>
-            <td><b>{{ r.n }}</b></td>
-            <td><div class="stackbar sm">{% for c, col in [('red', '#dc2626'), ('yellow', '#f5b014'), ('green', '#16a34a')] %}{% if r[c] %}<span style="flex:{{ r[c] }};background:{{ col }}"></span>{% endif %}{% endfor %}</div></td>
-            <td>{{ r.red or '–' }}</td><td>{{ r.yellow or '–' }}</td><td>{{ r.green or '–' }}</td>
-            <td>{{ r.psy or '–' }}</td><td>{{ r.missed or '–' }}</td><td>{{ r.lai or '–' }}</td>
-            <td>{% if r.lai_overdue %}<span class="pp bad">{{ r.lai_overdue }}</span>{% else %}–{% endif %}</td>
+            <td><b>{{ r.n|cell }}</b></td>
+            {# สัดส่วนในแถบสีบอกยอดจริงได้ — ไม่ login และมีช่องที่ถูกซ่อน ไม่แสดงแถบ #}
+            <td>{% if user or not min_cell or (r.red, r.yellow, r.green)|select('lt', min_cell)|reject('eq', 0)|list|length == 0 %}<div class="stackbar sm">{% for c, col in [('red', '#dc2626'), ('yellow', '#f5b014'), ('green', '#16a34a')] %}{% if r[c] %}<span style="flex:{{ r[c] }};background:{{ col }}"></span>{% endif %}{% endfor %}</div>{% endif %}</td>
+            <td>{{ r.red|cell }}</td><td>{{ r.yellow|cell }}</td><td>{{ r.green|cell }}</td>
+            <td>{{ r.psy|cell }}</td><td>{{ r.missed|cell }}</td><td>{{ r.lai|cell }}</td>
+            <td>{% if r.lai_overdue %}<span class="pp bad">{{ r.lai_overdue|cell }}</span>{% else %}–{% endif %}</td>
           </tr>
           {% endfor %}
           {% set t = s.by_pcu %}

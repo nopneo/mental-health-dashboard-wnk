@@ -8,7 +8,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -50,6 +50,17 @@ create table if not exists assessments (
   created_at text not null
 );
 create index if not exists ix_assess_hn on assessments(hn, assess_date);
+create table if not exists audit_log (
+  id integer primary key,
+  at text not null,
+  username text not null,
+  action text not null,          -- view_list / view_patient / assess / login / login_fail / logout
+  hn text,
+  detail text,
+  ip text
+);
+create index if not exists ix_audit_at on audit_log(at);
+create index if not exists ix_audit_hn on audit_log(hn);
 """
 
 
@@ -143,3 +154,34 @@ def history(hn):
         return [dict(r) for r in c.execute(
             "select a.*, u.display from assessments a left join users u on u.username = a.username "
             "where a.hn = ? order by a.assess_date desc, a.id desc", (hn,))]
+
+
+# ---------------------------------------------------------------- audit log (PDPA: ใครเปิดดูใคร เมื่อไร)
+
+def log(username, action, hn=None, detail=None, ip=None):
+    with conn() as c:
+        c.execute("insert into audit_log(at, username, action, hn, detail, ip) values (?, ?, ?, ?, ?, ?)",
+                  (_now(), username or "", action, hn, (detail or "")[:200] or None, ip))
+
+
+def audit(hn=None, username=None, limit=100):
+    sql, args = "select * from audit_log where 1 = 1", []
+    if hn:
+        sql += " and hn = ?"
+        args.append(hn)
+    if username:
+        sql += " and username = ?"
+        args.append(username)
+    with conn() as c:
+        return [dict(r) for r in c.execute(sql + " order by id desc limit ?", (*args, limit))]
+
+
+def recent_failures(username, ip, minutes):
+    """จำนวนครั้งที่ login ผิดใน N นาทีล่าสุด (ตามชื่อผู้ใช้, ตาม IP) — นับจาก audit_log
+    ใช้ SQLite แทนตัวแปรในหน่วยความจำ เพราะ gunicorn มีหลาย worker"""
+    since = (datetime.now() - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    with conn() as c:
+        q = "select count(*) from audit_log where action = 'login_fail' and at >= ? and {} = ?"
+        by_user = c.execute(q.format("username"), (since, username)).fetchone()[0]
+        by_ip = c.execute(q.format("ip"), (since, ip)).fetchone()[0] if ip else 0
+    return by_user, by_ip

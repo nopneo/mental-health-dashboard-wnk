@@ -4,6 +4,7 @@
   python manage.py passwd <username>
   python manage.py disable <username>      # ปิดบัญชี (เจ้าหน้าที่ย้ายหน่วย/ลาออก) · enable = เปิดคืน
   python manage.py users
+  python manage.py audit [--hn 0001234] [--user somchai] [--limit 100]   # ใครเปิดดู/บันทึกผู้ป่วยรายไหน
 """
 
 import argparse
@@ -34,6 +35,10 @@ def main():
     for name in ("disable", "enable"):
         sub.add_parser(name).add_argument("username")
     sub.add_parser("users")
+    au = sub.add_parser("audit")
+    au.add_argument("--hn")
+    au.add_argument("--user")
+    au.add_argument("--limit", type=int, default=100)
     args = ap.parse_args()
 
     if args.cmd == "adduser":
@@ -48,6 +53,9 @@ def main():
         if not store.set_active(args.username, args.cmd == "enable"):
             sys.exit("ไม่พบผู้ใช้นี้")
         print("ปิดบัญชีแล้ว" if args.cmd == "disable" else "เปิดบัญชีแล้ว")
+    elif args.cmd == "audit":
+        for r in store.audit(args.hn, args.user, args.limit):
+            print(f"{r['at']}  {r['username']:<16} {r['action']:<13} {r['hn'] or '':<10} {r['ip'] or '':<15} {r['detail'] or ''}")
     else:
         for u in store.list_users():
             print(f"{u['username']:<16} {u['hospcode']:<6} {'admin' if u['is_admin'] else '':<6} {'' if u['active'] else '(ปิด)':<5} {u['display']}")
