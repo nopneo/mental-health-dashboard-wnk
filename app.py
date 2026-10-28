@@ -61,7 +61,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 
 #: หน้าสาธารณะ: ยอดแยก รพ.สต. ที่น้อยกว่านี้แสดงเป็น "<N" (ตำบลเล็ก ยอด 1–2 รายอาจเดาตัวคนได้) · 0 = ปิด
 MIN_CELL = int(os.getenv("MH_PUBLIC_MIN_CELL", "5"))

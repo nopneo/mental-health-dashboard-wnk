@@ -1,6 +1,6 @@
 # คู่มือติดตั้งและใช้งาน Mental Health Dashboard
 
-แดชบอร์ดงานสุขภาพจิตจาก HOSxP · โรงพยาบาลวังน้ำเขียว · เวอร์ชัน 0.2.1
+แดชบอร์ดงานสุขภาพจิตจาก HOSxP · โรงพยาบาลวังน้ำเขียว · เวอร์ชัน 0.2.2
 
 ## 1. ภาพรวม
 
@@ -40,7 +40,7 @@ Mental Health Dashboard คือเว็บแอปที่อ่านข�
 **ขั้นที่ 1** แตกไฟล์และสร้างผู้ใช้ของแอป
 
 ```bash
-unzip mental_health_dashboard-0.2.0.zip -d /opt
+unzip mental_health_dashboard-0.2.2.zip -d /opt
 mv /opt/mental_health_dashboard /opt/mental_health
 useradd -r -s /sbin/nologin -d /var/lib/mh mh
 chown -R root:root /opt/mental_health
