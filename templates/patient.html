@@ -39,10 +39,10 @@
       <dt>รหัสโรค 12 เดือน</dt><dd>{% for c, d in p.codes|dictsort %}<span class="chip">{{ c }}</span>{% endfor %}</dd>
       <dt>วินิจฉัยครั้งแรก</dt><dd>{{ thai_date(p.first_dx) }}</dd>
       <dt>มาโรงพยาบาลล่าสุด</dt><dd>{{ thai_date(p.last_visit) }}</dd>
-      <dt>นัดคลินิกจิตเวช</dt><dd>ครั้งก่อน {{ thai_date(p.last_app) }} · ครั้งถัดไป <b>{{ thai_date(p.next_app) }}</b>
+      <dt>นัด</dt><dd>ครั้งก่อน {{ thai_date(p.last_app) }} · ครั้งถัดไป <b>{{ thai_date(p.next_app) }}</b>{% if p.next_app_clinic %} ({{ p.next_app_clinic }}){% endif %}
         {% if p.missed %}<span class="chip {{ 'crit' if p.missed.days > 30 else 'warn' }}">ขาดนัด {{ p.missed.days }} วัน</span>{% endif %}</dd>
       {% if p.lai %}
-      <dt>ยาฉีด LAI</dt><dd>ฉีดล่าสุด {{ thai_date(p.lai.last) }} · รอบละ {{ p.lai.interval }} วัน · ครบกำหนด <b>{{ thai_date(p.lai.due) }}</b>
+      <dt>ยาฉีด LAI</dt><dd>ฉีดล่าสุด {{ thai_date(p.lai.last) }} · รอบละ {{ p.lai.interval }} วัน · ครบกำหนด <b>{{ thai_date(p.lai.due) }}</b> {{ '(ตามนัด)' if p.lai.by_plan else '(ตามรอบเฉลี่ย)' }}
         {% if p.lai.status == 'overdue' %}<span class="chip crit">เลย {{ p.lai.late_days }} วัน</span>
         {% elif p.lai.status in ('due', 'late') %}<span class="chip warn">ใกล้/ถึงกำหนด</span>{% endif %}</dd>
       {% endif %}

@@ -1,6 +1,6 @@
 # Mental Health Dashboard — แดชบอร์ดงานสุขภาพจิต (HOSxP)
 
-> **เวอร์ชัน 0.2.0** — ใช้ได้ทุกโรงพยาบาลที่ใช้ HOSxP ·
+> **เวอร์ชัน 0.2.1** — ใช้ได้ทุกโรงพยาบาลที่ใช้ HOSxP ·
 > **คู่มือติดตั้ง: [INSTALL.md](INSTALL.md) · PDF [docs/MH_Dashboard_install_manual.pdf](docs/MH_Dashboard_install_manual.pdf)** ·
 > ดาวน์โหลดชุดติดตั้ง: [Releases](https://github.com/nopneo/mental-health-dashboard-wnk/releases/latest) ·
 > ความปลอดภัย: [SECURITY.md](SECURITY.md) · การเปลี่ยนแปลง: [CHANGELOG.md](CHANGELOG.md)

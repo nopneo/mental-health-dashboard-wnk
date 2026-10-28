@@ -54,7 +54,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 
 @app.after_request

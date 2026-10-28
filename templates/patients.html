@@ -82,7 +82,7 @@
         {% endfor %}
       </td>
       <td class="flags">{{ flags(p) }}</td>
-      <td class="small nowrap">{{ thai_date(p.next_app, True) if p.next_app else '–' }}</td>
+      <td class="small nowrap">{% if p.next_app %}{{ thai_date(p.next_app, True) }}<div class="tiny muted">{{ p.next_app_clinic }}</div>{% else %}–{% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="7" class="empty">ไม่พบผู้ป่วยตามเงื่อนไข</td></tr>

@@ -4,8 +4,10 @@
   - ไม่ใช้ทะเบียนคลินิก (ของ รพ.วังน้ำเขียวไม่ได้อัปเดตตั้งแต่ 2019) → นิยามผู้ป่วยในความดูแลจากข้อมูลจริง 12 เดือนล่าสุด
       มี dx F00–F99 หรือ X60–X84 (ทำร้ายตนเอง) · หรือได้ยาฉีด LAI · หรือ 8Q ≥ 17
   - F51 นอนไม่หลับอย่างเดียว แยกเป็นกลุ่มของตัวเอง ไม่นับในยอดหลักและไม่คิดสี
-  - ขาดนัด = นัดคลินิกจิตเวช (MH_CLINIC) ที่ผ่านมาแล้วเกิน 7 วัน และไม่มี visit ตั้งแต่ 3 วันก่อนนัด
-  - ยาฉีด: รอบฉีดของแต่ละคน = มัธยฐานของช่วงห่าง (7–90 วัน) ไม่มีให้ใช้ 28 วัน · เลยกำหนดเกิน 7 วัน = ขาดยาฉีด
+  - นัด = นัดทุกคลินิก (ผู้ป่วยจิตเวชหลายรายได้นัดที่ตรวจโรคทั่วไป/NCD) หรือเฉพาะ MH_CLINIC ถ้าตั้งไว้
+  - ขาดนัด = นัดล่าสุดที่ผ่านมาแล้วเกิน 7 วัน และไม่มี visit ตั้งแต่ 3 วันก่อนนัด
+  - ยาฉีด: ครบกำหนด = วันนัดที่ออกในวันฉีดครั้งล่าสุด (เลือกนัดที่ใกล้รอบฉีดปกติที่สุด)
+      ไม่มีนัด = ฉีดล่าสุด + มัธยฐานของช่วงห่าง (7–90 วัน, ไม่มีประวัติ = 28 วัน) · เลยกำหนดเกิน 7 วัน = ขาดยาฉีด
   - สี: ประเมิน 3 ข้อ (กินยา · ญาติดูแล · ไม่ใช้สารเสพติด) ดีครบ = เขียว · ไม่ดี 1–2 = เหลือง · ไม่ดีครบ 3 = แดง
       กินยา/สารเสพติด มีค่าเริ่มต้นจาก HOSxP · ผลประเมินในแอปชนะ ถ้าประเมินหลังหลักฐานล่าสุดจาก HOSxP
       ญาติดูแล มีจากการประเมินเท่านั้น ยังไม่ประเมิน = คิดสีจาก 2 ข้อ และติดป้าย "ประเมินไม่ครบ"
@@ -15,6 +17,7 @@ import csv
 import os
 import re
 import statistics
+import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -43,9 +46,11 @@ CHW = (_codes("MH_CHWPART", "30") or ("30",))[0]
 AMP = (_codes("MH_AMPPART", "25") or ("25",))[0]
 #: รหัส 5 หลักของ รพ. เอง — ใช้ใน village_pcu.csv แทนหมู่บ้านที่ รพ. ดูแลเอง
 HOSPCODE = (_codes("MH_HOSPCODE", "10894") or ("10894",))[0]
-#: คลินิกจิตเวชในตาราง oapp.clinic (ใช้นับขาดนัด)
-CLINICS = _codes("MH_CLINIC", "025")
-CLINIC_SQL = _sql_in(CLINICS)
+#: คลินิกใน oapp.clinic ที่นับเป็นนัดของผู้ป่วย — "all" (ค่าเริ่มต้น) = ทุกคลินิก
+#: ผู้ป่วยจิตเวชหลายรายได้นัดที่ตรวจโรคทั่วไป / NCD ไม่ใช่คลินิกจิตเวช จำกัดคลินิกแล้วจะไม่เห็นนัดและนับขาดนัดผิด
+CLINICS = _codes("MH_CLINIC", "all")
+ALL_CLINICS = not CLINICS or "all" in CLINICS
+CLINIC_COND = "" if ALL_CLINICS else f"and a.clinic in {_sql_in(CLINICS)}"
 
 #: ยาฉีดออกฤทธิ์นาน (LAI) "icode=ชื่อ;icode=ชื่อ" — ไม่ใส่ยาฉีดระงับอาการเฉียบพลัน (เช่น Zuclopenthixol acetate)
 _LAI_DEFAULT = ("1000310=Fluphenazine decanoate;1000352=Haloperidol decanoate;"
@@ -169,11 +174,11 @@ def _q_visit():
 
 
 def _q_app():
+    """นัดรายรายการ — ใช้หานัดล่าสุด/ถัดไป และนัดฉีดยาที่ออกในวันฉีด"""
     return fetch(f"""
-        select a.hn, max(case when a.nextdate < curdate() then a.nextdate end) last_app,
-          min(case when a.nextdate >= curdate() then a.nextdate end) next_app
-        from oapp a join {REG} r on r.hn = a.hn
-        where a.clinic in {CLINIC_SQL} and a.nextdate >= curdate() - interval 365 day group by a.hn""")
+        select a.hn, a.vstdate, a.nextdate, c.name clinic from oapp a join {REG} r on r.hn = a.hn
+        left join clinic c on c.clinic = a.clinic
+        where a.nextdate >= curdate() - interval 365 day {CLINIC_COND}""")
 
 
 def _q_admit_now():
@@ -235,13 +240,20 @@ def fiscal_year(d):
     return d.year + 543 + (1 if d.month >= 10 else 0)
 
 
-def _lai_status(dates, today):
-    """(รอบฉีด, ฉีดล่าสุด, ครบกำหนด, สถานะ) · สถานะ: ok / due (ครบใน 7 วัน) / late (เลยไม่เกิน 7 วัน) / overdue"""
+def _lai_status(dates, today, planned=()):
+    """(รอบฉีด, ฉีดล่าสุด, ครบกำหนด, ตามนัด?, สถานะ) · สถานะ: ok / due (ครบใน 7 วัน) / late (เลยไม่เกิน 7 วัน) / overdue
+
+    planned = วันนัดที่ออกในวันฉีดครั้งล่าสุด — แพทย์อาจเลื่อนรอบฉีด (เช่น จาก 4 เป็น 8 สัปดาห์) ใช้นัดก่อนรอบเฉลี่ย
+    """
     dates = sorted(set(dates))
     gaps = [(b - a).days for a, b in zip(dates, dates[1:]) if 7 <= (b - a).days <= 90]
     interval = int(statistics.median(gaps[-6:])) if gaps else 28
     last = dates[-1]
     due = last + timedelta(days=interval)
+    plan = [d for d in planned if 7 <= (d - last).days <= 120]
+    by_plan = bool(plan)
+    if plan:
+        due = min(plan, key=lambda d: abs((d - last).days - interval))
     if today > due + timedelta(days=LAI_GRACE):
         st = "overdue"
     elif today > due:
@@ -250,7 +262,7 @@ def _lai_status(dates, today):
         st = "due"
     else:
         st = "ok"
-    return interval, last, due, st
+    return interval, last, due, by_plan, st
 
 
 # ---------------------------------------------------------------- ทะเบียน
@@ -284,7 +296,7 @@ def build_registry():
             "phone": r["phone"] or "", "inform": r["informname"] or "", "inform_tel": r["informtel"] or "",
             "codes": {}, "groups": [], "lai": None, "missed": None, "admit": None,
             "ipd12": 0, "last_dc": None, "refer": None, "screen": None,
-            "last_visit": None, "last_app": None, "next_app": None, "first_dx": None,
+            "last_visit": None, "last_app": None, "next_app": None, "next_app_clinic": "", "first_dx": None,
         }
 
     for r in raw["dx"]:
@@ -297,10 +309,21 @@ def build_registry():
     for r in raw["visit"]:
         if r["hn"] in pts:
             pts[r["hn"]]["last_visit"] = _d(r["last_visit"])
+    made_on = {}                      # (hn, วันที่ออกนัด) → [วันนัด]
     for r in raw["app"]:
-        if r["hn"] in pts:
-            pts[r["hn"]]["last_app"] = _d(r["last_app"])
-            pts[r["hn"]]["next_app"] = _d(r["next_app"])
+        p = pts.get(r["hn"])
+        if not p:
+            continue
+        nd, vd = _d(r["nextdate"]), _d(r["vstdate"])
+        if not nd:
+            continue
+        if vd:
+            made_on.setdefault((r["hn"], vd), []).append(nd)
+        if nd < today:
+            if not p["last_app"] or nd > p["last_app"]:
+                p["last_app"] = nd
+        elif not p["next_app"] or nd < p["next_app"]:
+            p["next_app"], p["next_app_clinic"] = nd, r["clinic"] or ""
     for r in raw["admit"]:
         if r["hn"] in pts:
             pts[r["hn"]]["admit"] = {"an": r["an"], "regdate": _d(r["regdate"]), "ward": r["ward"] or ""}
@@ -332,8 +355,8 @@ def build_registry():
     for hn, ds in lai_dates.items():
         p = pts.get(hn)
         if p and max(ds) >= today - timedelta(days=365):
-            interval, last, due, st = _lai_status(ds, today)
-            p["lai"] = {"interval": interval, "last": last, "due": due, "status": st,
+            interval, last, due, by_plan, st = _lai_status(ds, today, made_on.get((hn, max(ds)), ()))
+            p["lai"] = {"interval": interval, "last": last, "due": due, "by_plan": by_plan, "status": st,
                         "late_days": max((today - due).days, 0),
                         "drug": LAI_ICODES.get(lai_drug.get(hn), "อื่น ๆ")}
 
@@ -612,10 +635,32 @@ _yearly_cache = TTLCache(maxsize=1)
 _FY = "year({c} + interval 3 month) + 543"
 
 
+YEARLY_TTL = 6 * 3600
+_yearly_lock = threading.Lock()
+
+
 def yearly():
-    hit = _yearly_cache.get("y", 3600)
+    """ข้อมูลรายปีเปลี่ยนช้าและดึงนาน (~15 วิ) — หมดอายุแล้วส่งของเดิมก่อน แล้วดึงใหม่เบื้องหลัง"""
+    hit = _yearly_cache.get("y", YEARLY_TTL)
     if hit:
         return hit
+    stale = _yearly_cache.get_stale("y")
+    if stale:
+        if _yearly_lock.acquire(blocking=False):
+            threading.Thread(target=_yearly_refresh, daemon=True).start()
+        return stale[1]
+    with _yearly_lock:
+        return _yearly_cache.get("y", YEARLY_TTL) or _yearly_build()
+
+
+def _yearly_refresh():
+    try:
+        _yearly_build()
+    finally:
+        _yearly_lock.release()
+
+
+def _yearly_build():
     start = f"{FY_FROM - 544}-10-01"
     sqls = {
         "dx": f"""select {_FY.format(c='vstdate')} fy, count(distinct hn) total,
@@ -644,7 +689,9 @@ def yearly():
         "app": f"""select {_FY.format(c='a.nextdate')} fy, count(*) apps,
                   sum(not exists(select 1 from ovst v where v.hn = a.hn
                       and v.vstdate between a.nextdate - interval 3 day and a.nextdate + interval 7 day)) missed
-                  from oapp a where a.clinic in {CLINIC_SQL} and a.nextdate >= '{start}'
+                  from oapp a join (select distinct hn from ovstdiag where icd10 like 'F%' and icd10 not like 'F51%') f
+                    on f.hn = a.hn
+                  where a.nextdate >= '{start}' {CLINIC_COND}
                     and a.nextdate < curdate() - interval 7 day group by fy""",
     }
     with ThreadPoolExecutor(max_workers=4) as ex:
