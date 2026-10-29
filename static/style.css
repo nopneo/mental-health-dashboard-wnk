@@ -67,6 +67,7 @@ h2 { font-size: 18px; margin-bottom: 14px; }
 .foot { max-width: 1440px; margin: 0 auto; padding: 8px 28px 24px; color: var(--muted); font-size: 12px; }
 .pagehead { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 18px; }
 .pagehead p { margin-top: 4px; }
+.row { display: flex; align-items: center; gap: 10px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px;
         margin-bottom: 18px; }
 .card.flush { padding: 0; overflow: hidden; }

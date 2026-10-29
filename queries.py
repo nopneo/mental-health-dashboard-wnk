@@ -21,6 +21,10 @@ import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
+from io import BytesIO
+
+from openpyxl import Workbook
+from openpyxl.styles import Font
 
 import store
 from cache import TTLCache
@@ -482,6 +486,67 @@ def filter_patients(pts, pcu=None, color=None, flag=None, group=None, q=None, al
         out.append(p)
     out.sort(key=lambda p: (-p["priority"], p["name"]))
     return out
+
+
+CRIT_LABEL = {True: "ดี", False: "ไม่ดี", None: "ยังไม่ประเมิน"}
+
+
+def flag_text(p):
+    """สรุป "ต้องติดตาม" เป็นข้อความบรรทัดเดียว — คู่กับ macro flags() ในหน้า patients.html"""
+    out = []
+    if p["admit"]:
+        out.append(f"นอน รพ. {p['admit']['ward']}")
+    if p["q8_high"]:
+        q8 = p["screen"]["q8"] if p["screen"] else None
+        out.append(f"8Q {q8}" if q8 is not None else "8Q เสี่ยงสูง")
+    if p["dc_pending"]:
+        out.append(f"D/C {thai_date(p['last_dc']['date'], True)} ยังไม่ติดตาม")
+    if p["lai"]:
+        st, late = p["lai"]["status"], p["lai"]["late_days"]
+        if st in ("overdue", "late"):
+            out.append(f"ยาฉีดเลย {late} วัน")
+        elif st == "due":
+            out.append(f"ยาฉีดครบ {thai_date(p['lai']['due'], True)}")
+        else:
+            out.append(f"ยาฉีดทุก {p['lai']['interval']} วัน")
+    if p["missed"]:
+        out.append(f"ขาดนัด {p['missed']['days']} วัน")
+    if p["selfharm"]:
+        out.append(f"ทำร้ายตนเอง {thai_date(p['selfharm'], True)}")
+    if p["refer"]:
+        out.append(f"Refer {thai_date(p['refer']['date'], True)}")
+    return " / ".join(out)
+
+
+XLSX_HEADERS = ["สี", "ชื่อ-สกุล", "HN", "เพศ", "อายุ", "ที่อยู่", "หมู่", "หน่วยบริการ", "กลุ่มโรค",
+                "การกินยา", "ญาติดูแล", "ไม่ใช้สารเสพติด", "ต้องติดตาม", "นัดถัดไป", "คลินิกนัด"]
+_XLSX_WIDTHS = [8, 28, 10, 6, 6, 24, 6, 20, 14, 12, 12, 16, 40, 14, 16]
+
+
+def patients_workbook(rows):
+    """สร้างไฟล์ Excel รายชื่อผู้ป่วย (ตามรายการที่กรองแล้ว) คืนเป็น BytesIO พร้อมอ่าน"""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "รายชื่อผู้ป่วย"
+    ws.append(XLSX_HEADERS)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    for p in rows:
+        crit = p["crit"]
+        ws.append([
+            COLORS.get(p["color"], "-"), p["name"], p["hn"], p["sex"],
+            p["age"] if p["age"] is not None else "-", p["addr"], p["moo"],
+            PCU_NAME.get(p["pcu"], p["pcu"]), GROUP_NAME.get(p["group"], p["group"]),
+            CRIT_LABEL[crit["med"][0]], CRIT_LABEL[crit["care"][0]], CRIT_LABEL[crit["sub"][0]],
+            flag_text(p), thai_date(p["next_app"]) if p["next_app"] else "-", p["next_app_clinic"] or "-",
+        ])
+    for i, w in enumerate(_XLSX_WIDTHS, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+    ws.freeze_panes = "A2"
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
 
 
 def summary(pts):

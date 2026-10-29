@@ -14,7 +14,7 @@ from datetime import date
 from functools import wraps
 from urllib.parse import urlsplit
 
-from flask import (Flask, abort, flash, g, redirect, render_template, request, session, url_for)
+from flask import (Flask, abort, flash, g, redirect, render_template, request, send_file, session, url_for)
 
 import db
 import queries
@@ -61,7 +61,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 
 #: หน้าสาธารณะ: ยอดแยก รพ.สต. ที่น้อยกว่านี้แสดงเป็น "<N" (ตำบลเล็ก ยอด 1–2 รายอาจเดาตัวคนได้) · 0 = ปิด
 MIN_CELL = int(os.getenv("MH_PUBLIC_MIN_CELL", "5"))
@@ -231,9 +231,8 @@ def dashboard():
                            years=years[-10:])
 
 
-@app.route("/patients")
-@login_required
-def patients():
+def _patients_filtered():
+    """อ่านตัวกรองจาก query string ให้ตรงสิทธิ์ของผู้ใช้ — ใช้ร่วมกันทั้งหน้ารายชื่อและไฟล์ Excel"""
     reg = queries.registry()
     a = request.args
     pcu = a.get("pcu") if a.get("pcu") in queries.PCU_NAME else None
@@ -244,12 +243,28 @@ def patients():
     scope = _scope()
     if scope != "all":
         pcu = scope
-    rows = queries.filter_patients(reg["pts"], pcu=pcu, color=color, flag=flag, group=group, q=q,
-                                   allowed_pcu=scope)
-    audit("view_list", detail=" ".join(f"{k}={v}" for k, v in
-                                       (("pcu", pcu), ("color", color), ("flag", flag), ("group", group), ("q", q)) if v))
-    return render_template("patients.html", rows=rows, reg=reg, scope=scope,
-                           f={"pcu": pcu, "color": color, "flag": flag, "group": group, "q": q})
+    f = {"pcu": pcu, "color": color, "flag": flag, "group": group, "q": q}
+    rows = queries.filter_patients(reg["pts"], allowed_pcu=scope, **f)
+    return reg, rows, scope, f
+
+
+@app.route("/patients")
+@login_required
+def patients():
+    reg, rows, scope, f = _patients_filtered()
+    audit("view_list", detail=" ".join(f"{k}={v}" for k, v in f.items() if v))
+    return render_template("patients.html", rows=rows, reg=reg, scope=scope, f=f)
+
+
+@app.route("/patients/export.xlsx")
+@login_required
+def patients_export():
+    _, rows, _, f = _patients_filtered()
+    audit("export_list", detail=" ".join(f"{k}={v}" for k, v in f.items() if v))
+    buf = queries.patients_workbook(rows)
+    fname = f"รายชื่อผู้ป่วย_{date.today().isoformat()}.xlsx"
+    return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True, download_name=fname)
 
 
 @app.route("/patient/<hn>", methods=["GET", "POST"])
