@@ -523,11 +523,7 @@ XLSX_HEADERS = ["สี", "ชื่อ-สกุล", "HN", "เพศ", "อ�
 _XLSX_WIDTHS = [8, 28, 10, 6, 6, 24, 6, 20, 14, 12, 12, 16, 40, 14, 16]
 
 
-def patients_workbook(rows):
-    """สร้างไฟล์ Excel รายชื่อผู้ป่วย (ตามรายการที่กรองแล้ว) คืนเป็น BytesIO พร้อมอ่าน"""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "รายชื่อผู้ป่วย"
+def _write_patients_sheet(ws, rows):
     ws.append(XLSX_HEADERS)
     for c in ws[1]:
         c.font = Font(bold=True)
@@ -543,6 +539,38 @@ def patients_workbook(rows):
     for i, w in enumerate(_XLSX_WIDTHS, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
     ws.freeze_panes = "A2"
+
+
+def _sheet_name(name, used):
+    """ชื่อชีท Excel ≤31 ตัวอักษร ห้ามมีอักขระ : \\ / ? * [ ] และห้ามซ้ำ"""
+    s = re.sub(r'[:\\/?*\[\]]', '', name)[:31] or "sheet"
+    base, i = s, 2
+    while s in used:
+        suffix = f" ({i})"
+        s = base[:31 - len(suffix)] + suffix
+        i += 1
+    used.add(s)
+    return s
+
+
+def patients_workbook(rows, by_pcu=False):
+    """สร้างไฟล์ Excel รายชื่อผู้ป่วย (ตามรายการที่กรองแล้ว) คืนเป็น BytesIO พร้อมอ่าน
+    by_pcu=True → แยกเป็นชีทตาม รพ.สต. (ชีทแรก = รวมทั้งหมด) สำหรับแจกให้แต่ละหน่วย"""
+    wb = Workbook()
+    if not by_pcu:
+        ws = wb.active
+        ws.title = "รายชื่อผู้ป่วย"
+        _write_patients_sheet(ws, rows)
+    else:
+        wb.remove(wb.active)
+        used = set()
+        _write_patients_sheet(wb.create_sheet(_sheet_name("รวมทั้งหมด", used)), rows)
+        by_code = {}
+        for p in rows:
+            by_code.setdefault(p["pcu"], []).append(p)
+        for code in PCU_ORDER:
+            if code in by_code:
+                _write_patients_sheet(wb.create_sheet(_sheet_name(PCU_NAME.get(code, code), used)), by_code[code])
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)

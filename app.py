@@ -260,9 +260,11 @@ def patients():
 @login_required
 def patients_export():
     _, rows, _, f = _patients_filtered()
-    audit("export_list", detail=" ".join(f"{k}={v}" for k, v in f.items() if v))
-    buf = queries.patients_workbook(rows)
-    fname = f"รายชื่อผู้ป่วย_{date.today().isoformat()}.xlsx"
+    by_pcu = request.args.get("by_pcu") == "1"
+    detail = " ".join(f"{k}={v}" for k, v in f.items() if v) + (" by_pcu" if by_pcu else "")
+    audit("export_list", detail=detail)
+    buf = queries.patients_workbook(rows, by_pcu=by_pcu)
+    fname = f"รายชื่อผู้ป่วย{'_แยกรพสต' if by_pcu else ''}_{date.today().isoformat()}.xlsx"
     return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                      as_attachment=True, download_name=fname)
 

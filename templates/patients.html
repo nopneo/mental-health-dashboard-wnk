@@ -23,6 +23,9 @@
   </div>
   <div class="row">
     <a class="btn ghost" href="{{ url_for('patients_export', **f) }}">ส่งออก Excel</a>
+    {% if scope == 'all' %}
+    <a class="btn ghost" href="{{ url_for('patients_export', by_pcu=1, **f) }}">ส่งออกแยกตาม รพ.สต.</a>
+    {% endif %}
     <form method="post" action="{{ url_for('refresh') }}">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}">
       <button class="btn ghost">ดึงข้อมูลใหม่</button>
