@@ -12,6 +12,7 @@
   {% endif %}
   {% if p.missed %}<span class="chip {{ 'crit' if p.missed.days > 30 else 'warn' }}">ขาดนัด {{ p.missed.days }} วัน</span>{% endif %}
   {% if p.selfharm %}<span class="chip warn">ทำร้ายตนเอง {{ thai_date(p.selfharm, True) }}</span>{% endif %}
+  {% if p.smiv %}<span class="chip crit">{% for lv in p.smiv|sort %}SMI-V{{ lv }}{{ ', ' if not loop.last }}{% endfor %}{{ ' + สารเสพติด' if p.sub_last }}</span>{% endif %}
   {% if p.refer %}<span class="chip">Refer {{ thai_date(p.refer.date, True) }}</span>{% endif %}
 {%- endmacro %}
 {% block body %}

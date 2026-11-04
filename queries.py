@@ -70,6 +70,19 @@ LAI_SQL = _sql_in(tuple(LAI_ICODES))
 PSY_HOSP = _codes("MH_PSY_HOSPCODES", "12268,EA0012268")
 PSY_HOSP_SQL = _sql_in(PSY_HOSP)
 
+#: SMI-V (จิตเวชเสี่ยงสูงก่อความรุนแรง) บันทึกใน Special PP (pp_special) — "รหัส=ระดับ;..." ระดับ 1–4
+#: ค่าเริ่มต้น 1B030–1B033 = SMI-V1–V4 (ไม่รวม 1B034 คัดกรองหลงผิดเกี่ยวกับราชวงศ์) · ตรวจรหัสของ รพ. ตัวเองก่อนใช้
+_SMIV_DEFAULT = "1B030=1;1B031=2;1B032=3;1B033=4"
+SMIV_CODES = {}
+for _item in os.getenv("MH_SMIV_CODES", _SMIV_DEFAULT).split(";"):
+    _code, _, _lv = _item.partition("=")
+    if re.fullmatch(r"[A-Za-z0-9]{1,6}", _code.strip()) and _lv.strip() in ("1", "2", "3", "4"):
+        SMIV_CODES[_code.strip()] = int(_lv)
+SMIV_SQL = _sql_in(tuple(SMIV_CODES))
+SMIV_LEVELS = {1: "SMI-V1 ทำร้ายตนเองรุนแรง", 2: "SMI-V2 ทำร้ายผู้อื่นรุนแรง",
+               3: "SMI-V3 หลงผิด/มุ่งร้ายผู้อื่น", 4: "SMI-V4 ก่อคดีรุนแรง"}
+DEP_CHILD_MIN, DEP_ADULT_MIN = 7, 15        # ซึมเศร้า: 7–14 ปี (เด็ก/วัยรุ่น) · 15 ปีขึ้นไป
+
 SELFHARM = "icd10 regexp '^X(6[0-9]|7[0-9]|8[0-4])'"
 REG = f"""(select hn from ovstdiag where vstdate >= curdate() - interval 12 month
              and (icd10 like 'F%' or {SELFHARM})
@@ -208,6 +221,15 @@ def _q_refer():
                or exists(select 1 from ovstdiag d where d.vn = r.vn and d.icd10 like 'F%'))""")
 
 
+def _q_smiv():
+    """SMI-V จาก Special PP — ทุกช่วงเวลา (ความเสี่ยงไม่หายไปเอง) แล้วไปจับคู่กับผู้ป่วยในทะเบียน"""
+    return fetch(f"""
+        select s.hn, t.pp_special_code code, max(date(s.entry_datetime)) last, min(date(s.entry_datetime)) first
+        from pp_special s join pp_special_type t on t.pp_special_type_id = s.pp_special_type_id
+        where t.pp_special_code in {SMIV_SQL} and s.hn is not null
+        group by s.hn, t.pp_special_code""")
+
+
 def _q_screen():
     return fetch("""
         select o.hn, s.screen_datetime, s.depression_score q9, s.suicide_score q8
@@ -283,7 +305,8 @@ def _criterion(auto_bad, evidence_date, manual_value, assess_date):
 def build_registry():
     today = date.today()
     jobs = {"pt": _q_patients, "dx": _q_dx, "first": _q_first_dx, "lai": _q_lai, "visit": _q_visit,
-            "app": _q_app, "admit": _q_admit_now, "ipd": _q_ipd, "refer": _q_refer, "screen": _q_screen}
+            "app": _q_app, "admit": _q_admit_now, "ipd": _q_ipd, "refer": _q_refer, "screen": _q_screen,
+            "smiv": _q_smiv}
     with ThreadPoolExecutor(max_workers=5) as ex:
         futs = {k: ex.submit(f) for k, f in jobs.items()}
         raw = {k: f.result() for k, f in futs.items()}
@@ -298,7 +321,7 @@ def build_registry():
             "age": num(r["age"], None), "addr": r["addrpart"] or "", "moo": r["moopart"] or "",
             "pcu": pcu_of(r["chwpart"], r["amppart"], r["tmbpart"], r["moopart"]),
             "phone": r["phone"] or "", "inform": r["informname"] or "", "inform_tel": r["informtel"] or "",
-            "codes": {}, "groups": [], "lai": None, "missed": None, "admit": None,
+            "codes": {}, "groups": [], "smiv": {}, "dep_band": None, "lai": None, "missed": None, "admit": None,
             "ipd12": 0, "last_dc": None, "refer": None, "screen": None,
             "last_visit": None, "last_app": None, "next_app": None, "next_app_clinic": "", "first_dx": None,
         }
@@ -310,6 +333,14 @@ def build_registry():
     for r in raw["first"]:
         if r["hn"] in pts:
             pts[r["hn"]]["first_dx"] = _d(r["first_dx"])
+    for r in raw["smiv"]:
+        p = pts.get(r["hn"])
+        lv = SMIV_CODES.get(r["code"])
+        if p and lv:
+            last, first = _d(r["last"]), _d(r["first"])
+            old = p["smiv"].get(lv)
+            p["smiv"][lv] = {"last": max(last, old["last"]) if old else last,
+                             "first": min(first, old["first"]) if old else first}
     for r in raw["visit"]:
         if r["hn"] in pts:
             pts[r["hn"]]["last_visit"] = _d(r["last_visit"])
@@ -381,6 +412,8 @@ def build_registry():
         p["main"] = p["group"] != "slp"
         sub_last = max((d for c, d in codes.items() if "F10" <= c <= "F19"), default=None)
         p["sub_last"] = sub_last
+        if "dep" in p["groups"] and p["age"] is not None:
+            p["dep_band"] = "adult" if p["age"] >= DEP_ADULT_MIN else "child" if p["age"] >= DEP_CHILD_MIN else None
 
         # ขาดนัด
         la = p["last_app"]
@@ -463,7 +496,13 @@ FLAGS = {
     "refer": ("Refer 12 เดือน", lambda p: p["refer"]),
     "incomplete": ("ประเมินไม่ครบ", lambda p: p["main"] and p["incomplete"]),
     "new": ("รายใหม่ปีงบนี้", lambda p: p["first_dx"] and fiscal_year(p["first_dx"]) == fiscal_year(date.today())),
+    "dep_adult": (f"ซึมเศร้า อายุ {DEP_ADULT_MIN} ปีขึ้นไป", lambda p: p["dep_band"] == "adult"),
+    "dep_child": (f"ซึมเศร้า อายุ {DEP_CHILD_MIN}–{DEP_ADULT_MIN - 1} ปี", lambda p: p["dep_band"] == "child"),
+    "smiv": ("SMI-V (ทุกระดับ)", lambda p: bool(p["smiv"])),
+    "smiv_sub": ("SMI-V + สารเสพติด", lambda p: bool(p["smiv"] and p["sub_last"])),
 }
+for _lv, _name in SMIV_LEVELS.items():
+    FLAGS[f"smiv{_lv}"] = (_name.split(" ")[0], lambda p, lv=_lv: lv in p["smiv"])
 
 
 def filter_patients(pts, pcu=None, color=None, flag=None, group=None, q=None, allowed_pcu="all"):
@@ -513,6 +552,8 @@ def flag_text(p):
         out.append(f"ขาดนัด {p['missed']['days']} วัน")
     if p["selfharm"]:
         out.append(f"ทำร้ายตนเอง {thai_date(p['selfharm'], True)}")
+    if p["smiv"]:
+        out.append(", ".join(f"SMI-V{lv}" for lv in sorted(p["smiv"])) + (" + สารเสพติด" if p["sub_last"] else ""))
     if p["refer"]:
         out.append(f"Refer {thai_date(p['refer']['date'], True)}")
     return " / ".join(out)
@@ -604,6 +645,17 @@ def summary(pts):
     groups = [{"key": k, "name": GROUP_NAME[k], "n": sum(1 for p in pts.values() if k in p["groups"]),
                "main": sum(1 for p in pts.values() if p["group"] == k)} for k in GROUP_NAME]
 
+    dep_age = [{"key": "adult", "flag": "dep_adult", "label": f"อายุ {DEP_ADULT_MIN} ปีขึ้นไป",
+                "n": sum(1 for p in pts.values() if p["dep_band"] == "adult")},
+               {"key": "child", "flag": "dep_child", "label": f"อายุ {DEP_CHILD_MIN}–{DEP_ADULT_MIN - 1} ปี",
+                "n": sum(1 for p in pts.values() if p["dep_band"] == "child")}]
+    smiv_pts = [p for p in pts.values() if p["smiv"]]
+    smiv = {"total": len(smiv_pts), "sub": sum(1 for p in smiv_pts if p["sub_last"]),
+            "levels": [{"lv": lv, "flag": f"smiv{lv}", "label": lb,
+                        "n": sum(1 for p in smiv_pts if lv in p["smiv"]),
+                        "sub": sum(1 for p in smiv_pts if lv in p["smiv"] and p["sub_last"])}
+                       for lv, lb in SMIV_LEVELS.items()]}
+
     by_pcu = []
     for code in PCU_ORDER:
         ps = [p for p in main if p["pcu"] == code]
@@ -618,7 +670,8 @@ def summary(pts):
             "lai_overdue": sum(1 for p in ps if p["lai"] and p["lai"]["status"] == "overdue"),
             "incomplete": sum(1 for p in ps if p["incomplete"]),
         })
-    return {"kpi": kpi, "colors": colors, "incomplete": incomplete, "groups": groups, "by_pcu": by_pcu}
+    return {"kpi": kpi, "colors": colors, "incomplete": incomplete, "groups": groups, "by_pcu": by_pcu,
+            "dep_age": dep_age, "smiv": smiv}
 
 
 # ---------------------------------------------------------------- หน้าสาธารณะ (ยอดรวมเท่านั้น)

@@ -102,6 +102,7 @@ curl http://127.0.0.1:6300/healthz      # ต้องได้ {"status":"ok"}
 | `MH_CLINIC` | คลินิกใน `oapp.clinic` ที่นับเป็นนัดของผู้ป่วย `all` = ทุกคลินิก (แนะนำ เพราะผู้ป่วยจิตเวชมักได้นัดที่ตรวจโรคทั่วไป/NCD) หรือระบุหลายรหัสคั่นด้วย , | all |
 | `MH_LAI_ICODES` | ยาฉีดออกฤทธิ์นาน รูปแบบ `icode=ชื่อ;icode=ชื่อ` | `1000310=Fluphenazine decanoate;1000352=Haloperidol decanoate` |
 | `MH_PSY_HOSPCODES` | รพ.จิตเวชที่ส่งต่อประจำ | 12268 |
+| `MH_SMIV_CODES` | รหัส Special PP ที่เป็น SMI-V `รหัส=ระดับ;...` (ระดับ 1–4) | `1B030=1;1B031=2;1B032=3;1B033=4` |
 | `MH_VILLAGE_CSV` | ที่อยู่ไฟล์หมู่บ้าน (ไม่ใส่ = `village_pcu.csv` ในโฟลเดอร์แอป) | – |
 
 ### หารหัสจาก HOSxP
@@ -119,6 +120,11 @@ where name like '%decano%' or name like '%depot%' or name like '%flupentixol%' o
 -- รหัส รพ.จิตเวชที่ส่งต่อบ่อย (MH_PSY_HOSPCODES)
 select r.refer_hospcode, h.name, count(*) from referout r left join hospcode h on h.hospcode = r.refer_hospcode
 where r.refer_date >= curdate() - interval 1 year and r.pdx like 'F%' group by 1, 2 order by 3 desc;
+
+-- SMI-V ใน Special PP (MH_SMIV_CODES) — ดูว่ารหัสของ รพ. ตรงกับค่าเริ่มต้นหรือไม่ ถ้าไม่มีแถวเลยให้ตั้งตามรหัสที่ รพ. ใช้
+select t.pp_special_code, t.pp_special_type_name, count(s.pp_special_id) n from pp_special_type t
+left join pp_special s on s.pp_special_type_id = t.pp_special_type_id
+where t.pp_special_code like '1B03%' group by 1, 2;
 
 -- รหัสจังหวัด/อำเภอที่ผู้ป่วยส่วนใหญ่อยู่ (MH_CHWPART / MH_AMPPART)
 select chwpart, amppart, count(*) from patient group by 1, 2 order by 3 desc limit 3;

@@ -155,6 +155,31 @@
           {% endfor %}
         </div>
         <div class="note"><span class="nt">หนึ่งคนอาจมีหลายกลุ่มโรค · ผู้ป่วยยาฉีดนับในกลุ่มโรคจิต · นอนไม่หลับ (F51) แยกไม่นับในยอดหลัก</span></div>
+
+        <div class="mini-h" style="margin-top:16px">😔 ซึมเศร้า แยกตามอายุ</div>
+        <div class="hbars">
+          {% set dmax2 = [s.dep_age|map(attribute='n')|max, 1]|max %}
+          {% for d in s.dep_age %}
+          <div class="hb"><span class="nm"><a href="{{ url_for('patients', flag=d.flag) }}">{{ d.label }}</a></span>
+            <span class="bar"><span class="track"><span class="fill" style="width:{{ (d.n * 100 / dmax2)|round(1) }}%"></span></span>
+              <span class="vl">{{ d.n|cell }}</span></span></div>
+          {% endfor %}
+        </div>
+
+        <div class="mini-h" style="margin-top:16px">⚠️ SMI-V (จิตเวชเสี่ยงสูงก่อความรุนแรง) · Special PP</div>
+        <table class="t">
+          <thead><tr><th>ระดับ</th><th>ทั้งหมด</th><th>ร่วมกับสารเสพติด</th></tr></thead>
+          <tbody>
+            {% for l in s.smiv.levels %}
+            <tr><td class="l"><a href="{{ url_for('patients', flag=l.flag) }}">{{ l.label }}</a></td>
+              <td><b>{{ l.n|cell }}</b></td><td>{{ l.sub|cell }}</td></tr>
+            {% endfor %}
+            <tr><td class="l"><a href="{{ url_for('patients', flag='smiv') }}"><b>รวม (นับคนไม่ซ้ำ)</b></a></td>
+              <td><b>{{ s.smiv.total|cell }}</b></td>
+              <td><a href="{{ url_for('patients', flag='smiv_sub') }}">{{ s.smiv.sub|cell }}</a></td></tr>
+          </tbody>
+        </table>
+        <div class="note"><span class="nt">นับคนไม่ซ้ำ — หนึ่งคนอาจมีหลายระดับ · ร่วมกับสารเสพติด = มี dx F10–F19 ใน 12 เดือน · อายุซึมเศร้าคิดจากผู้ป่วยในทะเบียน (F32–F39)</span></div>
       </div>
     </section>
 

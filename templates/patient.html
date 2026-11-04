@@ -36,6 +36,9 @@
     <h2>การรักษา</h2>
     <dl class="facts">
       <dt>กลุ่มโรค</dt><dd>{% for g in p.groups %}{{ GROUP_NAME[g] }}{{ ', ' if not loop.last }}{% endfor %}</dd>
+      {% if p.dep_band %}<dt>ซึมเศร้า</dt><dd>{{ 'อายุ 15 ปีขึ้นไป' if p.dep_band == 'adult' else 'อายุ 7–14 ปี' }}</dd>{% endif %}
+      {% if p.smiv %}<dt>SMI-V (Special PP)</dt><dd>{% for lv, v in p.smiv|dictsort %}<span class="chip crit">SMI-V{{ lv }}</span> ประเมินล่าสุด {{ thai_date(v.last, True) }}{{ ' · ' if not loop.last }}{% endfor %}
+        {% if p.sub_last %}<span class="chip warn">ร่วมกับสารเสพติด</span>{% endif %}</dd>{% endif %}
       <dt>รหัสโรค 12 เดือน</dt><dd>{% for c, d in p.codes|dictsort %}<span class="chip">{{ c }}</span>{% endfor %}</dd>
       <dt>วินิจฉัยครั้งแรก</dt><dd>{{ thai_date(p.first_dx) }}</dd>
       <dt>มาโรงพยาบาลล่าสุด</dt><dd>{{ thai_date(p.last_visit) }}</dd>
