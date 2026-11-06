@@ -61,7 +61,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 #: หน้าสาธารณะ: ยอดแยก รพ.สต. ที่น้อยกว่านี้แสดงเป็น "<N" (ตำบลเล็ก ยอด 1–2 รายอาจเดาตัวคนได้) · 0 = ปิด
 MIN_CELL = int(os.getenv("MH_PUBLIC_MIN_CELL", "5"))
@@ -179,6 +179,10 @@ def _safe_next(nxt):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    uid = session.get("uid")
+    if uid and store.get_user(uid):
+        # login แล้ว (เช่น กดเข้าสู่ระบบซ้ำตอนหน้ารายชื่อยังโหลด — session ถูกล้าง csrf ตอน login จึงเคยได้ 400)
+        return redirect(_safe_next(request.args.get("next") or "") or url_for("patients"))
     if request.method == "POST":
         _check_csrf()
         username = request.form.get("username", "").strip()[:64]

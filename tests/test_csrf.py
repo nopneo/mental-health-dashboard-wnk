@@ -31,3 +31,13 @@ def test_wrong_token_is_rejected(client):
     client.get("/login")
     r = client.post("/login", data={"csrf": "0" * 32, "username": "nurse1", "password": "secret-pass"})
     assert r.status_code == 400
+
+
+def test_repeated_login_post_after_success_redirects_instead_of_400(client):
+    # กดเข้าสู่ระบบซ้ำหลัง login สำเร็จ — session ไม่มี csrf แล้ว เดิมได้ 400 ทั้งที่ login อยู่
+    html = client.get("/login?next=/patients").get_data(as_text=True)
+    token = re.search(r'name="csrf" value="([0-9a-f]+)"', html).group(1)
+    data = {"csrf": token, "username": "nurse1", "password": "secret-pass"}
+    assert client.post("/login?next=/patients", data=data).status_code == 302
+    again = client.post("/login?next=/patients", data=data)
+    assert again.status_code == 302 and again.headers["Location"].endswith("/patients")
