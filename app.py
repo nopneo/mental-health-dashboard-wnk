@@ -61,7 +61,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
-VERSION = "0.3.2"
+VERSION = "0.4.0"
 
 #: หน้าสาธารณะ: ยอดแยก รพ.สต. ที่น้อยกว่านี้แสดงเป็น "<N" (ตำบลเล็ก ยอด 1–2 รายอาจเดาตัวคนได้) · 0 = ปิด
 MIN_CELL = int(os.getenv("MH_PUBLIC_MIN_CELL", "5"))
@@ -231,10 +231,16 @@ def _load_user():
 def dashboard():
     """หน้าสาธารณะแบบ ER/IPD Dashboard — ยอดรวมเท่านั้น ไม่มีชื่อ/HN ผู้ป่วย ใครเข้าดูก็ได้"""
     _load_user()
-    reg = queries.registry()
+    choices = queries.fy_choices()
+    try:
+        fy = int(request.args.get("fy", ""))
+    except ValueError:
+        fy = None
+    fy = fy if fy in choices else None          # รับเฉพาะปีงบที่มีปุ่ม — กันคนเรียกปีแปลก ๆ ให้ดึงฐานหนัก
+    reg = queries.registry(fy=fy)
     years = queries.yearly()
-    return render_template("public.html", s=queries.public_summary(reg["pts"]), reg=reg,
-                           years=years[-10:])
+    return render_template("public.html", s=queries.public_summary(reg["pts"], reg["win"]), reg=reg,
+                           years=years[-10:], fy=fy, fy_choices=choices, win=reg["win"])
 
 
 def _patients_filtered():

@@ -38,8 +38,9 @@
 
 <body>
 {% set k = s.kpi %}
+{% set pw = '12 เดือน' if not fy else 'ปีงบ ' ~ fy %}
 <div class="toolbar">
-  <span class="asof">ข้อมูล ณ {{ thai_date(reg.at) }} เวลา {{ reg.at.strftime('%H:%M') }} น. · ผู้ป่วยที่มารับบริการด้านจิตเวชใน 12 เดือนล่าสุด</span>
+  <span class="asof">ข้อมูล ณ {{ thai_date(reg.at) }} เวลา {{ reg.at.strftime('%H:%M') }} น. · ผู้ป่วยที่มารับบริการด้านจิตเวช{{ 'ใน 12 เดือนล่าสุด' if not fy else ' ' ~ win.label ~ ' (' ~ thai_date(win.start, True) ~ ' – ' ~ thai_date(win.asof, True) ~ ')' }}</span>
   {% if user %}
     <a class="login" href="{{ url_for('patients') }}">📋 รายชื่อผู้ป่วย</a>
     <a class="login ghost" href="{{ url_for('yearly') }}">📈 ย้อนหลังรายปี</a>
@@ -47,6 +48,16 @@
     <a class="login" href="{{ url_for('login') }}">🔒 เข้าสู่ระบบเพื่อดูรายชื่อผู้ป่วย</a>
     <a class="login ghost" href="{{ url_for('yearly') }}">📈 ย้อนหลังรายปี</a>
   {% endif %}
+</div>
+
+{#- ปุ่มดูข้อมูลแบบปีงบประมาณ (1 ต.ค. – 30 ก.ย.) — ลิงก์ธรรมดา ไม่ต้องใช้ JS -#}
+<div class="toolbar periods">
+  <span class="hint">ดูข้อมูลแบบ</span>
+  <a class="pd {{ 'on' if not fy }}" href="{{ url_for('dashboard') }}">12 เดือนล่าสุด</a>
+  {% for y in fy_choices %}
+  <a class="pd {{ 'on' if fy == y }}" href="{{ url_for('dashboard', fy=y) }}" title="1 ต.ค. {{ y - 1 }} – 30 ก.ย. {{ y }}">ปีงบ {{ y }}</a>
+  {% endfor %}
+  {% if fy %}<span class="hint">สถานะ "ณ วันที่" (ขาดนัด ยาฉีดเลยกำหนด สี) คิดถึง {{ thai_date(win.asof) }} · ผลประเมินในแอปไม่นำมาคิด · ไม่นับผู้ที่เสียชีวิตแล้ว · ลิงก์ไปรายชื่อผู้ป่วยแสดงข้อมูลปัจจุบัน</span>{% endif %}
 </div>
 
 <div class="sheet">
@@ -63,7 +74,7 @@
     </div>
     <div class="meta">
       <span class="a">ปีงบประมาณ {{ k.fy }}</span>
-      <div class="b">ข้อมูล 12 เดือนล่าสุด · จาก HOSxP<br>ณ {{ thai_date(reg.at) }} เวลา {{ reg.at.strftime('%H:%M') }} น.</div>
+      <div class="b">ข้อมูล {{ 'ทั้งปีงบ' if fy else '12 เดือนล่าสุด' }} · จาก HOSxP<br>ณ {{ thai_date(reg.at) }} เวลา {{ reg.at.strftime('%H:%M') }} น.</div>
     </div>
   </div>
 
@@ -71,7 +82,7 @@
   <section class="block">
     <header><span class="no">1</span>
       <span><span class="t">Mental Health KPI</span> <span class="st">ภาพรวมงานสุขภาพจิต</span></span>
-      <span class="filters"><span class="chip">📅 12 เดือนล่าสุด</span><span class="chip">🏥 รพ. + {{ pcu_count }} รพ.สต.</span></span>
+      <span class="filters"><span class="chip">📅 {{ win.label }}</span><span class="chip">🏥 รพ. + {{ pcu_count }} รพ.สต.</span></span>
     </header>
     <div class="body">
       <div class="kpis">
@@ -93,10 +104,10 @@
         </div>
         <div class="kpi g-blue"><span class="e">🛏</span>
           <div class="l">นอน รพ. ตอนนี้<small>Admitted</small></div>
-          <div class="v">{{ k.admit }}</div><div class="u">ราย · Admit 12 เดือน {{ s.ipd.episodes }} ครั้ง</div>
+          <div class="v">{{ k.admit }}</div><div class="u">ราย · Admit {{ pw }} {{ s.ipd.episodes }} ครั้ง</div>
         </div>
         <div class="kpi g-amber"><span class="e">🚐</span>
-          <div class="l">ส่งต่อ<small>Refer Out 12 เดือน</small></div>
+          <div class="l">ส่งต่อ<small>Refer Out {{ pw }}</small></div>
           <div class="v">{{ k.refer_12m }}</div><div class="u">ราย · เดือนนี้ {{ k.refer_month }} ราย</div>
         </div>
         <div class="kpi g-rose"><span class="e">🆘</span>
@@ -179,7 +190,7 @@
               <td><a href="{{ url_for('patients', flag='smiv_sub') }}">{{ s.smiv.sub|cell }}</a></td></tr>
           </tbody>
         </table>
-        <div class="note"><span class="nt">นับคนไม่ซ้ำ — หนึ่งคนอาจมีหลายระดับ · ร่วมกับสารเสพติด = มี dx F10–F19 ใน 12 เดือน · อายุซึมเศร้าคิดจากผู้ป่วยในทะเบียน (F32–F39)</span></div>
+        <div class="note"><span class="nt">นับคนไม่ซ้ำ — หนึ่งคนอาจมีหลายระดับ · ร่วมกับสารเสพติด = มี dx F10–F19 ใน {{ pw }} · อายุซึมเศร้าคิดจากผู้ป่วยในทะเบียน (F32–F39)</span></div>
       </div>
     </section>
 
@@ -212,7 +223,7 @@
         <span><span class="t">Admit · D/C · Refer</span> <span class="st">การรักษาต่อเนื่อง</span></span></header>
       <div class="body">
         <div class="ipdgrid">
-          <div class="qt"><div class="l">Admit 12 เดือน</div><div class="v">{{ s.ipd.episodes }}<span class="u">ครั้ง</span></div>
+          <div class="qt"><div class="l">Admit {{ pw }}</div><div class="v">{{ s.ipd.episodes }}<span class="u">ครั้ง</span></div>
             <div class="p">{{ s.ipd.pts }} ราย · dx หลักจิตเวช</div></div>
           <div class="qt"><div class="l">นอน รพ. ตอนนี้</div><div class="v">{{ k.admit }}<span class="u">ราย</span></div>
             <div class="p">ผู้ป่วยในทะเบียน</div></div>
@@ -221,7 +232,7 @@
           <div class="qt {{ 'warn' if s.ipd.dc_pending }}"><div class="l">D/C 30 วัน · ยังไม่ติดตาม</div><div class="v">{{ s.ipd.dc_pending }}<span class="u">ราย</span></div>
             <div class="p">ควรเยี่ยมบ้าน / โทรติดตาม</div></div>
         </div>
-        <div class="mini-h" style="margin-top:14px">🚐 ส่งต่อไปที่ (12 เดือน)</div>
+        <div class="mini-h" style="margin-top:14px">🚐 ส่งต่อไปที่ ({{ pw }})</div>
         {% set rmax = (s.refer_dests|map(attribute='value')|max) if s.refer_dests else 1 %}
         <div class="hbars">
           {% for d in s.refer_dests %}
@@ -256,7 +267,7 @@
 
     <section class="block">
       <header><span class="no">7</span>
-        <span><span class="t">Screening</span> <span class="st">คัดกรองซึมเศร้า/ฆ่าตัวตาย 12 เดือน</span></span></header>
+        <span><span class="t">Screening</span> <span class="st">คัดกรองซึมเศร้า/ฆ่าตัวตาย {{ pw }}</span></span></header>
       <div class="body">
         {% set sc = s.screen %}
         <div class="qgrid" style="grid-template-columns:repeat(2,minmax(0,1fr))">

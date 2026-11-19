@@ -13,12 +13,14 @@
       ญาติดูแล มีจากการประเมินเท่านั้น ยังไม่ประเมิน = คิดสีจาก 2 ข้อ และติดป้าย "ประเมินไม่ครบ"
 """
 
+import calendar
 import csv
 import os
 import re
 import statistics
 import threading
 import time as _time
+from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -84,12 +86,59 @@ SMIV_LEVELS = {1: "SMI-V1 ทำร้ายตนเองรุนแรง", 
 DEP_CHILD_MIN, DEP_ADULT_MIN = 7, 15        # ซึมเศร้า: 7–14 ปี (เด็ก/วัยรุ่น) · 15 ปีขึ้นไป
 
 SELFHARM = "icd10 regexp '^X(6[0-9]|7[0-9]|8[0-4])'"
-REG = f"""(select hn from ovstdiag where vstdate >= curdate() - interval 12 month
-             and (icd10 like 'F%' or {SELFHARM})
-           union select hn from opitemrece where vstdate >= curdate() - interval 12 month
-             and icode in {LAI_SQL}
-           union select o.hn from depression_screen s join ovst o on o.vn = s.vn
-             where s.screen_datetime >= curdate() - interval 12 month and s.suicide_score >= 17)"""
+Win = namedtuple("Win", "start asof fy label")
+
+
+def _lit(d):
+    """วันที่เป็น literal SQL — มาจาก date ของ Python เท่านั้น ไม่รับข้อความจากผู้ใช้"""
+    return "'" + d.isoformat() + "'"
+
+
+def _months_ago(d, n):
+    """เหมือน SQL `d - interval n month` (วันที่ 31 ถอยไปเดือนที่สั้นกว่า → วันสุดท้ายของเดือน)"""
+    y, m = divmod(d.year * 12 + d.month - 1 - n, 12)
+    return date(y, m + 1, min(d.day, calendar.monthrange(y, m + 1)[1]))
+
+
+def fiscal_range(fy):
+    """ปีงบประมาณ พ.ศ. → (1 ต.ค. ปีก่อน, 30 ก.ย.)"""
+    return date(fy - 544, 10, 1), date(fy - 543, 9, 30)
+
+
+FY_CHOICES = 6        # ปุ่มปีงบ: ปีปัจจุบัน + ย้อนหลังอีก 5 ปี
+
+
+def fy_choices(today=None):
+    cur = fiscal_year(today or date.today())
+    return [cur - i for i in range(FY_CHOICES)]
+
+
+def period(fy=None, today=None):
+    """ช่วงข้อมูลที่ใช้คำนวณ · fy=None → 12 เดือนล่าสุดนับถึงวันนี้ · fy=ปีงบ พ.ศ. → ทั้งปีงบ (ถึงวันนี้ถ้ายังไม่จบ)
+    สถานะ "ณ วันที่" (ขาดนัด ยาฉีดเลยกำหนด สี) คิดถึงวันสิ้นสุดช่วง ไม่ใช่วันนี้"""
+    today = today or date.today()
+    if fy is None:
+        return Win(_months_ago(today, 12), today, None, "12 เดือนล่าสุด")
+    d1, d2 = fiscal_range(fy)
+    return Win(d1, min(d2, today), fy, f"ปีงบประมาณ {fy}")
+
+
+def _back(w):
+    """ต้นช่วงของข้อมูลที่ดูย้อนหลังแบบ "1 ปี" (Admit/Refer/คัดกรอง) — ปีงบใช้ต้นปีงบ ไม่งั้นย้อน 365 วัน"""
+    return w.start if w.fy else w.asof - timedelta(days=365)
+
+
+def _reg(w):
+    """ผู้ป่วยที่เข้าทะเบียนในช่วง w: dx F/X60–84, ยาฉีด LAI, หรือ 8Q ≥ 17"""
+    a, b = _lit(w.start), _lit(w.asof)
+    return f"""(select hn from ovstdiag where vstdate between {a} and {b}
+                 and (icd10 like 'F%' or {SELFHARM})
+               union select hn from opitemrece where vstdate between {a} and {b}
+                 and icode in {LAI_SQL}
+               union select o.hn from depression_screen s join ovst o on o.vn = s.vn
+                 where s.screen_datetime >= {a} and s.screen_datetime < {_lit(w.asof + timedelta(days=1))}
+                   and s.suicide_score >= 17)"""
+
 
 # กลุ่มโรค เรียงตามลำดับความสำคัญ — กลุ่มหลักของผู้ป่วยคือกลุ่มแรกที่เข้า
 GROUPS = [
@@ -153,88 +202,91 @@ def pcu_of(chw, amp, tmb, moo):
 
 # ---------------------------------------------------------------- SQL
 
-def _q_patients():
+def _q_patients(w):
     return fetch(f"""
         select p.hn, p.pname, p.fname, p.lname, p.sex, p.birthday,
-          timestampdiff(year, p.birthday, curdate()) age,
+          timestampdiff(year, p.birthday, {_lit(w.asof)}) age,
           p.chwpart, p.amppart, p.tmbpart, p.moopart, p.addrpart,
           coalesce(nullif(trim(p.mobile_phone_number), ''), nullif(trim(p.hometel), '')) phone,
           p.informname, p.informtel, p.death
-        from patient p join {REG} r on r.hn = p.hn""")
+        from patient p join {_reg(w)} r on r.hn = p.hn""")
 
 
-def _q_dx():
+def _q_dx(w):
     return fetch(f"""
         select hn, left(icd10, 3) c, max(vstdate) last, min(vstdate) first12
-        from ovstdiag where vstdate >= curdate() - interval 12 month
+        from ovstdiag where vstdate between {_lit(w.start)} and {_lit(w.asof)}
           and (icd10 like 'F%' or {SELFHARM})
         group by hn, c""")
 
 
-def _q_first_dx():
+def _q_first_dx(w):
     return fetch(f"""
-        select d.hn, min(d.vstdate) first_dx from ovstdiag d join {REG} r on r.hn = d.hn
-        where d.icd10 like 'F%' group by d.hn""")
+        select d.hn, min(d.vstdate) first_dx from ovstdiag d join {_reg(w)} r on r.hn = d.hn
+        where d.icd10 like 'F%' and d.vstdate <= {_lit(w.asof)} group by d.hn""")
 
 
-def _q_lai():
+def _q_lai(w):
     return fetch(f"""
         select hn, vstdate, max(icode) icode from opitemrece
-        where vstdate >= curdate() - interval 400 day and icode in {LAI_SQL}
+        where vstdate between {_lit(w.asof - timedelta(days=400))} and {_lit(w.asof)} and icode in {LAI_SQL}
         group by hn, vstdate""")
 
 
-def _q_visit():
+def _q_visit(w):
     return fetch(f"""
-        select o.hn, max(o.vstdate) last_visit from ovst o join {REG} r on r.hn = o.hn
-        where o.vstdate >= curdate() - interval 400 day group by o.hn""")
+        select o.hn, max(o.vstdate) last_visit from ovst o join {_reg(w)} r on r.hn = o.hn
+        where o.vstdate between {_lit(w.asof - timedelta(days=400))} and {_lit(w.asof)} group by o.hn""")
 
 
-def _q_app():
+def _q_app(w):
     """นัดรายรายการ — ใช้หานัดล่าสุด/ถัดไป และนัดฉีดยาที่ออกในวันฉีด"""
     return fetch(f"""
-        select a.hn, a.vstdate, a.nextdate, c.name clinic from oapp a join {REG} r on r.hn = a.hn
+        select a.hn, a.vstdate, a.nextdate, c.name clinic from oapp a join {_reg(w)} r on r.hn = a.hn
         left join clinic c on c.clinic = a.clinic
-        where a.nextdate >= curdate() - interval 365 day {CLINIC_COND}""")
+        where a.nextdate >= {_lit(w.asof - timedelta(days=365))} and a.vstdate <= {_lit(w.asof)} {CLINIC_COND}""")
 
 
-def _q_admit_now():
+def _q_admit_now(w):
     return fetch(f"""
-        select i.hn, i.an, i.regdate, w.name ward from ipt i join {REG} r on r.hn = i.hn
+        select i.hn, i.an, i.regdate, w.name ward from ipt i join {_reg(w)} r on r.hn = i.hn
         left join ward w on w.ward = i.ward
-        where i.dchdate is null and i.regdate >= curdate() - interval 180 day""")
+        where (i.dchdate is null or i.dchdate > {_lit(w.asof)})
+          and i.regdate between {_lit(w.asof - timedelta(days=180))} and {_lit(w.asof)}""")
 
 
-def _q_ipd():
-    return fetch("""
+def _q_ipd(w):
+    return fetch(f"""
         select i.hn, i.an, i.regdate, i.dchdate, d.icd10 from ipt i
         join iptdiag d on d.an = i.an and d.diagtype = '1' and d.icd10 like 'F%'
-        where i.dchdate >= curdate() - interval 365 day""")
+        where i.dchdate between {_lit(_back(w))} and {_lit(w.asof)}""")
 
 
-def _q_refer():
+def _q_refer(w):
     return fetch(f"""
         select r.hn, r.refer_date, r.refer_hospcode, h.name dest from referout r
-        join {REG} g on g.hn = r.hn left join hospcode h on h.hospcode = r.refer_hospcode
-        where r.refer_date >= curdate() - interval 365 day
+        join {_reg(w)} g on g.hn = r.hn left join hospcode h on h.hospcode = r.refer_hospcode
+        where r.refer_date between {_lit(_back(w))} and {_lit(w.asof)}
           and (r.refer_hospcode in {PSY_HOSP_SQL} or r.pdx like 'F%'
                or exists(select 1 from ovstdiag d where d.vn = r.vn and d.icd10 like 'F%'))""")
 
 
-def _q_smiv():
+def _q_smiv(w):
     """SMI-V จาก Special PP — ทุกช่วงเวลา (ความเสี่ยงไม่หายไปเอง) แล้วไปจับคู่กับผู้ป่วยในทะเบียน"""
     return fetch(f"""
         select s.hn, t.pp_special_code code, max(date(s.entry_datetime)) last, min(date(s.entry_datetime)) first
         from pp_special s join pp_special_type t on t.pp_special_type_id = s.pp_special_type_id
         where t.pp_special_code in {SMIV_SQL} and s.hn is not null
+          and s.entry_datetime < {_lit(w.asof + timedelta(days=1))}
         group by s.hn, t.pp_special_code""")
 
 
-def _q_screen():
-    return fetch("""
+def _q_screen(w):
+    return fetch(f"""
         select o.hn, s.screen_datetime, s.depression_score q9, s.suicide_score q8
         from depression_screen s join ovst o on o.vn = s.vn
-        where s.screen_datetime >= curdate() - interval 365 day""")
+        where s.screen_datetime >= {_lit(_back(w))}
+          and s.screen_datetime < {_lit(w.asof + timedelta(days=1))}""")
 
 
 # ---------------------------------------------------------------- helpers
@@ -302,13 +354,14 @@ def _criterion(auto_bad, evidence_date, manual_value, assess_date):
     return (not auto_bad), "hosxp"
 
 
-def build_registry():
-    today = date.today()
+def build_registry(w=None):
+    w = w or period()
+    today = w.asof
     jobs = {"pt": _q_patients, "dx": _q_dx, "first": _q_first_dx, "lai": _q_lai, "visit": _q_visit,
             "app": _q_app, "admit": _q_admit_now, "ipd": _q_ipd, "refer": _q_refer, "screen": _q_screen,
             "smiv": _q_smiv}
     with ThreadPoolExecutor(max_workers=5) as ex:
-        futs = {k: ex.submit(f) for k, f in jobs.items()}
+        futs = {k: ex.submit(f, w) for k, f in jobs.items()}
         raw = {k: f.result() for k, f in futs.items()}
 
     pts = {}
@@ -395,7 +448,8 @@ def build_registry():
                         "late_days": max((today - due).days, 0),
                         "drug": LAI_ICODES.get(lai_drug.get(hn), "อื่น ๆ")}
 
-    assess = store.latest_assessments()
+    # ผลประเมินในแอปเป็นของ "ตอนนี้" — ย้อนดูปีงบที่จบแล้วใช้ค่าจาก HOSxP อย่างเดียว ไม่เอาผลประเมินใหม่มาทับ
+    assess = store.latest_assessments() if today >= date.today() else {}
 
     for p in pts.values():
         codes = p["codes"]
@@ -463,18 +517,32 @@ def build_registry():
 
 
 REG_TTL = int(os.getenv("MH_CACHE_TTL", "300"))
-_reg_cache = TTLCache(maxsize=1)
+FY_TTL = int(os.getenv("MH_FY_CACHE_TTL", "3600"))     # ปีงบที่จบแล้วเปลี่ยนช้า
+_reg_cache = TTLCache(maxsize=FY_CHOICES + 2)
+_reg_locks = {}
+_reg_locks_guard = threading.Lock()
 
 
-def registry(force=False):
+def registry(force=False, fy=None):
+    """ทะเบียนผู้ป่วยตามช่วงข้อมูล (fy=None → 12 เดือนล่าสุด) · แคชแยกตามช่วง · ดึงช่วงเดียวกันพร้อมกันครั้งเดียว"""
+    w = period(fy)
+    key = (w.start, w.asof)
+    ttl = REG_TTL if fy is None or w.asof >= date.today() else FY_TTL
     if not force:
-        hit = _reg_cache.get("r", REG_TTL)
+        hit = _reg_cache.get(key, ttl)
         if hit:
             return hit
-    t = _time.time()
-    reg = {"pts": build_registry(), "at": datetime.now(), "secs": round(_time.time() - t, 1)}
-    _reg_cache.set("r", reg)
-    return reg
+    with _reg_locks_guard:
+        lock = _reg_locks.setdefault(key, threading.Lock())
+    with lock:
+        if not force:
+            hit = _reg_cache.get(key, ttl)
+            if hit:
+                return hit
+        t = _time.time()
+        reg = {"pts": build_registry(w), "at": datetime.now(), "secs": round(_time.time() - t, 1), "win": w}
+        _reg_cache.set(key, reg)
+        return reg
 
 
 def invalidate():
@@ -618,8 +686,8 @@ def patients_workbook(rows, by_pcu=False):
     return buf
 
 
-def summary(pts):
-    today = date.today()
+def summary(pts, today=None):
+    today = today or date.today()
     main = [p for p in pts.values() if p["main"]]
     fy = fiscal_year(today)
     kpi = {
@@ -679,15 +747,17 @@ def summary(pts):
 AGE_BANDS = [("< 15", 0, 14), ("15–24", 15, 24), ("25–39", 25, 39), ("40–59", 40, 59), ("60+", 60, 200)]
 LAI_STATUS = [("ok", "ฉีดตามรอบ", "#16a34a"), ("due", "ครบกำหนดใน 7 วัน", "#f59e0b"),
               ("late", "เลยกำหนด ≤ 7 วัน", "#fb923c"), ("overdue", "เลยกำหนด > 7 วัน", "#dc2626")]
-_screen_cache = TTLCache(maxsize=1)
+_screen_cache = TTLCache(maxsize=FY_CHOICES + 2)
 
 
-def screening_12m():
-    """ผลคัดกรอง 2Q/9Q/8Q 12 เดือน (ทุกคนที่ถูกคัดกรอง ไม่เฉพาะผู้ป่วยในทะเบียน)"""
-    hit = _screen_cache.get("s", REG_TTL)
+def screening_12m(w=None):
+    """ผลคัดกรอง 2Q/9Q/8Q ในช่วงข้อมูล (ทุกคนที่ถูกคัดกรอง ไม่เฉพาะผู้ป่วยในทะเบียน)"""
+    w = w or period()
+    key = (w.start, w.asof)
+    hit = _screen_cache.get(key, REG_TTL if w.fy is None else FY_TTL)
     if hit:
         return hit
-    r = fetch("""
+    r = fetch(f"""
         select count(*) screens, count(distinct o.hn) pts,
           sum(s.feel_depression_2_week = 'Y' or s.feel_boring_2_week = 'Y') q2_pos,
           sum(s.depression_score between 7 and 12) q9_mild, sum(s.depression_score between 13 and 18) q9_mod,
@@ -695,9 +765,9 @@ def screening_12m():
           sum(s.suicide_score between 1 and 8) q8_low, sum(s.suicide_score between 9 and 16) q8_mid,
           sum(s.suicide_score >= 17) q8_high
         from depression_screen s join ovst o on o.vn = s.vn
-        where s.screen_datetime >= curdate() - interval 12 month""")
+        where s.screen_datetime >= {_lit(w.start)} and s.screen_datetime < {_lit(w.asof + timedelta(days=1))}""")
     out = {k: num(v) for k, v in (r[0] if r else {}).items()}
-    _screen_cache.set("s", out)
+    _screen_cache.set(key, out)
     return out
 
 
@@ -705,9 +775,10 @@ def _pct(a, b):
     return round(a * 100.0 / b, 1) if b else 0.0
 
 
-def public_summary(pts):
-    s = summary(pts)
-    today = date.today()
+def public_summary(pts, w=None):
+    w = w or period()
+    s = summary(pts, w.asof)
+    today = w.asof
     main = [p for p in pts.values() if p["main"]]
     n = len(main) or 1
     k = s["kpi"]
@@ -768,8 +839,9 @@ def public_summary(pts):
         al.append(("info", f"ยังประเมินไม่ครบ 3 ข้อ {s['incomplete']:,} ราย", "บันทึก", "ข้อสังเกต",
                    "ประเมินเรื่องญาติดูแลระหว่างเยี่ยมบ้าน", "incomplete"))
     s["alerts"] = [dict(zip(("level", "issue", "where", "status", "action", "flag"), a)) for a in al]
-    s["screen"] = screening_12m()
+    s["screen"] = screening_12m(w)
     s["today"] = today
+    s["win"] = w
     return s
 
 

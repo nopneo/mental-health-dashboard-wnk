@@ -499,3 +499,10 @@ table.t td a:hover { text-decoration: underline; }
   .toolbar a.login { margin-left: 0; }
   .lights .lt .v { font-size: 30px; }
 }
+
+/* ปุ่มเลือกช่วงข้อมูล: 12 เดือนล่าสุด / ปีงบประมาณ */
+.toolbar.periods { gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.toolbar.periods a.pd { text-decoration: none; font-weight: 600; font-size: 14px; padding: 5px 14px; border-radius: 12px;
+                        background: #fff; color: var(--red-d); border: 1.5px solid #ddd0fa; }
+.toolbar.periods a.pd:hover { border-color: #a78bfa; }
+.toolbar.periods a.pd.on { background: linear-gradient(135deg, #6d28d9, #a78bfa); color: #fff; border-color: transparent; }
