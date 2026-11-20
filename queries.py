@@ -632,6 +632,17 @@ XLSX_HEADERS = ["สี", "ชื่อ-สกุล", "HN", "เพศ", "อ�
 _XLSX_WIDTHS = [8, 28, 10, 6, 6, 24, 6, 20, 14, 12, 12, 16, 40, 14, 16]
 
 
+_XL_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _xl_text(c):
+    """ข้อความจาก HOSxP (ชื่อ ที่อยู่ ฯลฯ) ที่ขึ้นต้นด้วย = + - @ ต้องเป็นข้อความ ไม่ใช่สูตร Excel
+    (เช่นชื่อ "=HYPERLINK(...)" จะกลายเป็นลิงก์/สูตรในเครื่องเจ้าหน้าที่ที่เปิดไฟล์)"""
+    if isinstance(c.value, str) and c.value.startswith(_XL_FORMULA_START):
+        c.data_type = "s"
+        c.quotePrefix = True
+
+
 def _write_patients_sheet(ws, rows):
     ws.append(XLSX_HEADERS)
     for c in ws[1]:
@@ -645,6 +656,8 @@ def _write_patients_sheet(ws, rows):
             CRIT_LABEL[crit["med"][0]], CRIT_LABEL[crit["care"][0]], CRIT_LABEL[crit["sub"][0]],
             flag_text(p), thai_date(p["next_app"]) if p["next_app"] else "-", p["next_app_clinic"] or "-",
         ])
+        for c in ws[ws.max_row]:
+            _xl_text(c)
     for i, w in enumerate(_XLSX_WIDTHS, start=1):
         ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
     ws.freeze_panes = "A2"
