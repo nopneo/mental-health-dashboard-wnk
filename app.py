@@ -61,7 +61,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 #: หน้าสาธารณะ: ยอดแยก รพ.สต. ที่น้อยกว่านี้แสดงเป็น "<N" (ตำบลเล็ก ยอด 1–2 รายอาจเดาตัวคนได้) · 0 = ปิด
 MIN_CELL = int(os.getenv("MH_PUBLIC_MIN_CELL", "5"))
@@ -149,13 +149,18 @@ def _cell(n):
         return "–"
     if MIN_CELL and n < MIN_CELL and not g.get("user"):
         return f"<{MIN_CELL}"
-    return n
+    return "{:,}".format(n) if isinstance(n, int) else n
+
+
+def hidden(n):
+    """True = ยอด 1..MIN_CELL-1 ที่ต้องซ่อนจากคนที่ยังไม่ login (ใช้กับความสูงแท่งกราฟ)"""
+    return bool(MIN_CELL and isinstance(n, int) and 0 < n < MIN_CELL and not g.get("user"))
 
 
 @app.context_processor
 def _ctx():
     img = lambda n: os.path.exists(os.path.join(_HERE, "static", "img", n))
-    return {"version": VERSION, "csrf_token": _csrf_token, "user": g.get("user"), "min_cell": MIN_CELL,
+    return {"version": VERSION, "csrf_token": _csrf_token, "user": g.get("user"), "min_cell": MIN_CELL, "hidden": hidden,
             "hospital": hospital_name(), "hospital_en": os.getenv("MH_HOSPITAL_NAME_EN", ""),
             "contact": os.getenv("MH_CONTACT", "งานสุขภาพจิต " + hospital_name()),
             "logo_url": url_for("static", filename="img/hospital_logo.png" if img("hospital_logo.png") else "img/logo.png"),
