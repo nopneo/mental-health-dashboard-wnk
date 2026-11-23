@@ -104,15 +104,15 @@
         </div>
         <div class="kpi g-blue"><span class="e">🛏</span>
           <div class="l">นอน รพ. ตอนนี้<small>Admitted</small></div>
-          <div class="v">{{ k.admit }}</div><div class="u">ราย · Admit {{ pw }} {{ s.ipd.episodes }} ครั้ง</div>
+          <div class="v">{{ k.admit|cell }}</div><div class="u">ราย · Admit {{ pw }} {{ s.ipd.episodes|cell }} ครั้ง</div>
         </div>
         <div class="kpi g-amber"><span class="e">🚐</span>
           <div class="l">ส่งต่อ<small>Refer Out {{ pw }}</small></div>
-          <div class="v">{{ k.refer_12m }}</div><div class="u">ราย · เดือนนี้ {{ k.refer_month }} ราย</div>
+          <div class="v">{{ k.refer_12m }}</div><div class="u">ราย · เดือนนี้ {{ k.refer_month|cell }} ราย</div>
         </div>
         <div class="kpi g-rose"><span class="e">🆘</span>
           <div class="l">เสี่ยงฆ่าตัวตายสูง<small>8Q ≥ 17</small></div>
-          <div class="v">{{ k.q8 }}</div><div class="u">ราย · ทำร้ายตนเอง {{ k.selfharm }} ราย</div>
+          <div class="v">{{ k.q8|cell }}</div><div class="u">ราย · ทำร้ายตนเอง {{ k.selfharm|cell }} ราย</div>
         </div>
       </div>
     </div>
@@ -223,22 +223,22 @@
         <span><span class="t">Admit · D/C · Refer</span> <span class="st">การรักษาต่อเนื่อง</span></span></header>
       <div class="body">
         <div class="ipdgrid">
-          <div class="qt"><div class="l">Admit {{ pw }}</div><div class="v">{{ s.ipd.episodes }}<span class="u">ครั้ง</span></div>
-            <div class="p">{{ s.ipd.pts }} ราย · dx หลักจิตเวช</div></div>
-          <div class="qt"><div class="l">นอน รพ. ตอนนี้</div><div class="v">{{ k.admit }}<span class="u">ราย</span></div>
+          <div class="qt"><div class="l">Admit {{ pw }}</div><div class="v">{{ s.ipd.episodes|cell }}<span class="u">ครั้ง</span></div>
+            <div class="p">{{ s.ipd.pts|cell }} ราย · dx หลักจิตเวช</div></div>
+          <div class="qt"><div class="l">นอน รพ. ตอนนี้</div><div class="v">{{ k.admit|cell }}<span class="u">ราย</span></div>
             <div class="p">ผู้ป่วยในทะเบียน</div></div>
-          <div class="qt ok"><div class="l">D/C 30 วัน · มา รพ. แล้ว</div><div class="v">{{ s.ipd.dc_done }}<span class="u">ราย</span></div>
-            <div class="p">จาก D/C {{ s.ipd.dc30 }} ราย</div></div>
-          <div class="qt {{ 'warn' if s.ipd.dc_pending }}"><div class="l">D/C 30 วัน · ยังไม่ติดตาม</div><div class="v">{{ s.ipd.dc_pending }}<span class="u">ราย</span></div>
+          <div class="qt ok"><div class="l">D/C 30 วัน · มา รพ. แล้ว</div><div class="v">{{ s.ipd.dc_done|cell }}<span class="u">ราย</span></div>
+            <div class="p">จาก D/C {{ s.ipd.dc30|cell }} ราย</div></div>
+          <div class="qt {{ 'warn' if s.ipd.dc_pending }}"><div class="l">D/C 30 วัน · ยังไม่ติดตาม</div><div class="v">{{ s.ipd.dc_pending|cell }}<span class="u">ราย</span></div>
             <div class="p">ควรเยี่ยมบ้าน / โทรติดตาม</div></div>
         </div>
         <div class="mini-h" style="margin-top:14px">🚐 ส่งต่อไปที่ ({{ pw }})</div>
-        {% set rmax = (s.refer_dests|map(attribute='value')|max) if s.refer_dests else 1 %}
+        {% set rmax = [(s.refer_dests|map(attribute='value')|max) if s.refer_dests else 1, 1 if user else (min_cell or 1)]|max %}
         <div class="hbars">
           {% for d in s.refer_dests %}
           <div class="hb"><span class="nm">{{ d.name }}</span>
-            <span class="bar"><span class="track"><span class="fill" style="width:{{ (d.value * 100 / rmax)|round(1) }}%;background:linear-gradient(90deg,#2f6fe4,#93c5fd)"></span></span>
-              <span class="vl">{{ d.value }} ราย</span></span></div>
+            <span class="bar"><span class="track"><span class="fill" style="width:{{ ((min_cell if hidden(d.value) else d.value) * 100 / rmax)|round(1) }}%;background:linear-gradient(90deg,#2f6fe4,#93c5fd)"></span></span>
+              <span class="vl">{{ d.value|cell }} ราย</span></span></div>
           {% endfor %}
         </div>
       </div>
@@ -280,17 +280,17 @@
         {% set q9 = [{'label': 'น้อย (7–12)', 'value': sc.q9_mild or 0, 'color': '#fbbf24'},
                      {'label': 'ปานกลาง (13–18)', 'value': sc.q9_mod or 0, 'color': '#fb923c'},
                      {'label': 'รุนแรง (≥ 19)', 'value': sc.q9_sev or 0, 'color': '#dc2626'}] %}
-        {% set q9max = (q9|map(attribute='value')|max) or 1 %}
+        {% set q9max = [(q9|map(attribute='value')|max) or 1, 1 if user else (min_cell or 1)]|max %}
         <div class="hbars">
-          {% for it in q9 %}<div class="hb"><span class="nm">{{ it.label }}</span><span class="bar"><span class="track"><span class="fill" style="width:{{ (it.value * 100 / q9max)|round(1) }}%;background:{{ it.color }}"></span></span><span class="vl">{{ it.value }}</span></span></div>{% endfor %}
+          {% for it in q9 %}<div class="hb"><span class="nm">{{ it.label }}</span><span class="bar"><span class="track"><span class="fill" style="width:{{ ((min_cell if hidden(it.value) else it.value) * 100 / q9max)|round(1) }}%;background:{{ it.color }}"></span></span><span class="vl">{{ it.value|cell }}</span></span></div>{% endfor %}
         </div>
         <div class="mini-h" style="margin-top:6px">🆘 8Q เสี่ยงฆ่าตัวตาย</div>
         {% set q8 = [{'label': 'น้อย (1–8)', 'value': sc.q8_low or 0, 'color': '#fbbf24'},
                      {'label': 'ปานกลาง (9–16)', 'value': sc.q8_mid or 0, 'color': '#fb923c'},
                      {'label': 'สูง (≥ 17)', 'value': sc.q8_high or 0, 'color': '#dc2626'}] %}
-        {% set q8max = (q8|map(attribute='value')|max) or 1 %}
+        {% set q8max = [(q8|map(attribute='value')|max) or 1, 1 if user else (min_cell or 1)]|max %}
         <div class="hbars">
-          {% for it in q8 %}<div class="hb"><span class="nm">{{ it.label }}</span><span class="bar"><span class="track"><span class="fill" style="width:{{ (it.value * 100 / q8max)|round(1) }}%;background:{{ it.color }}"></span></span><span class="vl">{{ it.value }}</span></span></div>{% endfor %}
+          {% for it in q8 %}<div class="hb"><span class="nm">{{ it.label }}</span><span class="bar"><span class="track"><span class="fill" style="width:{{ ((min_cell if hidden(it.value) else it.value) * 100 / q8max)|round(1) }}%;background:{{ it.color }}"></span></span><span class="vl">{{ it.value|cell }}</span></span></div>{% endfor %}
         </div>
       </div>
     </section>
