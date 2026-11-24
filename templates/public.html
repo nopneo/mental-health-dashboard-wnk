@@ -45,7 +45,8 @@
     <a class="login" href="{{ url_for('patients') }}">📋 รายชื่อผู้ป่วย</a>
     <a class="login ghost" href="{{ url_for('yearly') }}">📈 ย้อนหลังรายปี</a>
   {% else %}
-    <a class="login" href="{{ url_for('login') }}">🔒 เข้าสู่ระบบเพื่อดูรายชื่อผู้ป่วย</a>
+    {% if list_ok %}<a class="login" href="{{ url_for('login') }}">🔒 เข้าสู่ระบบเพื่อดูรายชื่อผู้ป่วย</a>
+    {% else %}<span class="login ghost" title="ชื่อผู้ป่วยไม่เปิดผ่านอินเทอร์เน็ต">🔒 รายชื่อผู้ป่วยดูได้เฉพาะเครื่องใน รพ.</span>{% endif %}
     <a class="login ghost" href="{{ url_for('yearly') }}">📈 ย้อนหลังรายปี</a>
   {% endif %}
 </div>

@@ -39,7 +39,7 @@
     <a href="{{ url_for('dashboard') }}">ภาพรวม</a>
     <a href="{{ url_for('yearly') }}" class="{{ 'on' if request.endpoint == 'yearly' }}">ย้อนหลังรายปี</a>
   </nav>
-  {% if request.endpoint != 'login' %}<a class="btn sm" href="{{ url_for('login') }}">เข้าสู่ระบบ</a>{% endif %}
+  {% if list_ok and request.endpoint != 'login' %}<a class="btn sm" href="{{ url_for('login') }}">เข้าสู่ระบบ</a>{% endif %}
 </header>
 {% endif %}
 <main class="sheet">
