@@ -1,14 +1,16 @@
 """Mental Health Dashboard — แดชบอร์ดงานสุขภาพจิต (HOSxP)
 
 หน้าภาพรวม (/) และย้อนหลังรายปี เปิดสาธารณะ — ยอดรวมเท่านั้น
-หน้ารายชื่อ/รายละเอียดผู้ป่วยต้อง login · ผู้ใช้ รพ.สต. เห็นรายชื่อเฉพาะในเขตของตัวเอง
+หน้ารายชื่อ/รายละเอียดผู้ป่วยต้อง login และเปิดได้เฉพาะเครื่องใน รพ. (MH_LIST_LAN_ONLY) · ผู้ใช้ รพ.สต. เห็นรายชื่อเฉพาะในเขตของตัวเอง
 
 รันเอง:      python app.py            → http://127.0.0.1:6300/
-production:  gunicorn -b 0.0.0.0:6300 app:app   (ออกผ่าน sub-path เช่น /mh/)
+production:  gunicorn -b 127.0.0.1:6300 app:app หลัง Apache (sub-path เช่น /mh/) — ห้ามเปิด 0.0.0.0
 สร้างผู้ใช้:  python manage.py adduser <username> --display "ชื่อ" [--hospcode 02840] [--admin]
 """
 
+import ipaddress
 import os
+import re
 import secrets
 from datetime import date
 from functools import wraps
@@ -29,21 +31,31 @@ except ImportError:
     pass
 
 
+#: reverse proxy ที่เชื่อ X-Forwarded-For / -Prefix / -Proto ได้ (Apache บนเครื่องเดียวกัน)
+TRUSTED_PROXIES = {x.strip() for x in os.getenv("MH_TRUSTED_PROXIES", "127.0.0.1,::1").split(",") if x.strip()}
+#: sub-path ที่รับ: /ชื่อ หรือ /ชื่อ/ชื่อ — ไม่รับ // หรืออักขระที่แทรกลงลิงก์ได้
+_PREFIX_RE = re.compile(r"(/[A-Za-z0-9_-]+)+/?")
+
+
 class PrefixMiddleware:
-    """อ่าน X-Forwarded-Prefix → SCRIPT_NAME และ X-Forwarded-Proto → url_scheme (sub-path หลัง proxy)"""
+    """อ่าน X-Forwarded-Prefix → SCRIPT_NAME และ X-Forwarded-Proto → url_scheme (sub-path หลัง proxy)
+    เชื่อเฉพาะจาก TRUSTED_PROXIES — เครื่องอื่นส่ง header ปลอมมาแก้ลิงก์ในหน้าไม่ได้"""
 
     def __init__(self, wsgi_app):
         self.wsgi_app = wsgi_app
 
     def __call__(self, environ, start_response):
-        prefix = environ.get("HTTP_X_FORWARDED_PREFIX", "")
+        trusted = environ.get("REMOTE_ADDR", "") in TRUSTED_PROXIES
+        prefix = environ.get("HTTP_X_FORWARDED_PREFIX", "") if trusted else ""
+        if prefix and not _PREFIX_RE.fullmatch(prefix):
+            prefix = ""
         if prefix:
             environ["SCRIPT_NAME"] = prefix.rstrip("/")
             path = environ.get("PATH_INFO", "")
             if path.startswith(prefix):
                 environ["PATH_INFO"] = path[len(prefix):] or "/"
-        proto = environ.get("HTTP_X_FORWARDED_PROTO")
-        if proto:
+        proto = environ.get("HTTP_X_FORWARDED_PROTO") if trusted else None
+        if proto in ("http", "https"):
             environ["wsgi.url_scheme"] = proto
         return self.wsgi_app(environ, start_response)
 
@@ -61,7 +73,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   SESSION_COOKIE_SECURE=os.getenv("MH_COOKIE_SECURE", "0") == "1",
                   PERMANENT_SESSION_LIFETIME=8 * 3600)
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 
 #: หน้าสาธารณะ: ยอดแยก รพ.สต. ที่น้อยกว่านี้แสดงเป็น "<N" (ตำบลเล็ก ยอด 1–2 รายอาจเดาตัวคนได้) · 0 = ปิด
 MIN_CELL = int(os.getenv("MH_PUBLIC_MIN_CELL", "5"))
@@ -81,14 +93,71 @@ def _security_headers(resp):
 
 # ---------------------------------------------------------------- auth
 
+def _nets(spec):
+    out = []
+    for x in spec.split(","):
+        try:
+            out.append(ipaddress.ip_network(x.strip(), strict=False))
+        except ValueError:
+            pass
+    return out
+
+
+_CF_DEFAULT = ("173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,"
+               "190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,"
+               "104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,"
+               "2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32")
+CF_NETS = _nets(os.getenv("MH_CF_RANGES", _CF_DEFAULT))
+#: IP สาธารณะจริงของ รพ. (เข้าผ่าน Cloudflare) ที่นับเป็นเครื่องใน รพ. — ห้ามใส่ IP บ้าน/มือถือ
+LAN_NETS = _nets(os.getenv("MH_LAN_NETS", ""))
+#: IP ภายในมาตรฐาน — ระบุเอง ไม่ใช้ ip.is_private ที่นับช่วงสาธารณะบางช่วงเป็น private ด้วย
+PRIVATE_NETS = _nets("10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7")
+
+
+def _ip(v):
+    try:
+        ip = ipaddress.ip_address((v or "").strip())
+    except ValueError:
+        return None
+    return ip.ipv4_mapped if getattr(ip, "ipv4_mapped", None) else ip
+
+
 def client_ip():
-    """IP ผู้ใช้จริง: เชื่อ X-Forwarded-For เฉพาะเมื่อคำขอมาจาก proxy บนเครื่องเดียวกัน
-    และใช้ค่าตัวท้ายสุด (ที่ proxy ของเราเติม) — ตัวหน้า ๆ ผู้ใช้ปลอมเองได้"""
+    """IP ผู้ใช้จริง: เชื่อ X-Forwarded-For เฉพาะเมื่อคำขอมาจาก proxy บนเครื่องเดียวกัน และใช้ค่าตัวท้ายสุด
+    (ที่ proxy ของเราเติม — ตัวหน้า ๆ ผู้ใช้ปลอมเองได้) · ตัวท้ายสุดเป็นเครื่อง Cloudflare → ใช้ CF-Connecting-IP
+    (IP จริงที่ Cloudflare ใส่ให้ — ไม่งั้น audit log และตัวนับรหัสผิดเห็นแต่ IP ของ Cloudflare)"""
     ip = request.remote_addr or ""
-    xff = request.headers.get("X-Forwarded-For", "")
-    if xff and ip in ("127.0.0.1", "::1"):
-        ip = xff.split(",")[-1].strip()
+    if ip in TRUSTED_PROXIES:
+        xff = [x.strip() for x in request.headers.get("X-Forwarded-For", "").split(",") if x.strip()]
+        hop = xff[-1] if xff else ip
+        hop_ip = _ip(hop)
+        cf = request.headers.get("CF-Connecting-IP", "").strip()
+        ip = cf if cf and _ip(cf) and hop_ip and any(hop_ip in n for n in CF_NETS) else hop
     return ip[:45]
+
+
+def from_lan():
+    """เครื่องใน รพ.: IP ภายใน (เช่นเข้าทางโดเมนภายใน lan.wnkhos.go.th) หรือ IP ใน MH_LAN_NETS
+    คำขอผ่าน Cloudflare นับเฉพาะ MH_LAN_NETS (IP สาธารณะของ รพ.)"""
+    ip = _ip(client_ip())
+    if ip is None:
+        return False
+    if any(ip in n for n in LAN_NETS):
+        return True
+    if request.headers.get("CF-Connecting-IP", "").strip():
+        return False
+    return any(ip in n for n in PRIVATE_NETS)
+
+
+def list_allowed():
+    """หน้ารายชื่อ/ผู้ป่วย/login เปิดได้ไหม — ค่าเริ่มต้นเฉพาะเครื่องใน รพ. (ชื่อผู้ป่วยจิตเวชต้องไม่ออกอินเทอร์เน็ต)
+    MH_LIST_LAN_ONLY=0 = ปิดข้อจำกัดนี้เอง (ไม่แนะนำ)"""
+    return os.getenv("MH_LIST_LAN_ONLY", "1") == "0" or from_lan()
+
+
+def _list_gate():
+    if not list_allowed():
+        abort(403)
 
 
 def audit(action, hn=None, detail=None):
@@ -98,6 +167,7 @@ def audit(action, hn=None, detail=None):
 def login_required(f):
     @wraps(f)
     def wrap(*a, **kw):
+        _list_gate()
         uid = session.get("uid")
         g.user = store.get_user(uid) if uid else None
         if not g.user:
@@ -161,6 +231,7 @@ def hidden(n):
 def _ctx():
     img = lambda n: os.path.exists(os.path.join(_HERE, "static", "img", n))
     return {"version": VERSION, "csrf_token": _csrf_token, "user": g.get("user"), "min_cell": MIN_CELL, "hidden": hidden,
+            "list_ok": list_allowed(),
             "hospital": hospital_name(), "hospital_en": os.getenv("MH_HOSPITAL_NAME_EN", ""),
             "contact": os.getenv("MH_CONTACT", "งานสุขภาพจิต " + hospital_name()),
             "logo_url": url_for("static", filename="img/hospital_logo.png" if img("hospital_logo.png") else "img/logo.png"),
@@ -184,6 +255,7 @@ def _safe_next(nxt):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    _list_gate()
     uid = session.get("uid")
     if uid and store.get_user(uid):
         # login แล้ว (เช่น กดเข้าสู่ระบบซ้ำตอนหน้ารายชื่อยังโหลด — session ถูกล้าง csrf ตอน login จึงเคยได้ 400)
@@ -227,8 +299,9 @@ def _scope():
 
 
 def _load_user():
-    """หน้าสาธารณะ: ไม่บังคับ login แต่ถ้า login อยู่ให้รู้ว่าเป็นใคร (แสดงปุ่มรายชื่อ)"""
-    uid = session.get("uid")
+    """หน้าสาธารณะ: ไม่บังคับ login แต่ถ้า login อยู่ให้รู้ว่าเป็นใคร (แสดงปุ่มรายชื่อ)
+    นอก รพ. ถือว่าไม่ได้ login เสมอ (session เก่าที่ login ไว้ก่อนเปิดข้อจำกัด ไม่ทำให้เห็นตัวเลขเต็ม)"""
+    uid = session.get("uid") if list_allowed() else None
     g.user = store.get_user(uid) if uid else None
 
 
@@ -325,6 +398,13 @@ def refresh():
     queries.registry(force=True)
     return redirect(request.referrer if request.referrer and request.referrer.startswith(request.host_url)
                     else url_for("dashboard"))
+
+
+@app.errorhandler(403)
+def _forbidden(_e):
+    return render_template("message.html", title="เปิดได้เฉพาะเครื่องในโรงพยาบาล",
+                           text="หน้ารายชื่อผู้ป่วยเปิดได้เฉพาะเครื่องในโรงพยาบาล "
+                                "(เครือข่าย รพ. หรือทางเข้าภายใน) — หน้าภาพรวมและย้อนหลังรายปีเปิดได้ตามปกติ"), 403
 
 
 @app.route("/healthz")

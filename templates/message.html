@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block body %}
+<div class="login">
+  <img src="{{ logo_url }}" alt="" class="login-logo">
+  <h1>{{ title }}</h1>
+  <p class="muted">{{ text }}</p>
+  <p><a class="btn" href="{{ url_for('dashboard') }}">กลับหน้าภาพรวม</a></p>
+</div>
+{% endblock %}
